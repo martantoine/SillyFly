@@ -1,233 +1,158 @@
 # Main simulation file called by the Webots
 
 import numpy as np
-from controller import Supervisor, Keyboard
 from pid_control import pid_velocity_fixed_height_controller
 from my_control import MyController
 import example
 import time, random
+
+import logging
+from threading import Timer
+import cflib.crtp  # noqa
+from cflib.crazyflie import Crazyflie
+from cflib.crazyflie.log import LogConfig
+from cflib.utils import uri_helper
+
+uri = uri_helper.uri_from_env(default='radio://0/90/2M/E7E7E7E709')
+
+# Only output errors from the logging framework
+logging.basicConfig(level=logging.ERROR)
 
 # Set 'True' to enable random positions of obstacles and the drone
 enable_random_environment = True
 # Set seed to replicate the random environment
 # random.seed(3000)
 
-# Crazyflie drone class in webots
-class CrazyflieInDroneDome(Supervisor):
+class Logging:
+    """
+    Simple logging example class that logs the Stabilizer from a supplied
+    link uri and disconnects after 5s.
+    """
+
     def __init__(self):
-        super().__init__()
-        self.timestep = int(self.getBasicTimeStep())
+        """ Initialize and run the example with the specified link_uri """
 
-        # Actuators
-        self.m1_motor = self.getDevice("m1_motor")
-        self.m1_motor.setPosition(float('inf'))
-        self.m1_motor.setVelocity(-1)
-        self.m2_motor = self.getDevice("m2_motor")
-        self.m2_motor.setPosition(float('inf'))
-        self.m2_motor.setVelocity(1)
-        self.m3_motor = self.getDevice("m3_motor")
-        self.m3_motor.setPosition(float('inf'))
-        self.m3_motor.setVelocity(-1)
-        self.m4_motor = self.getDevice("m4_motor")
-        self.m4_motor.setPosition(float('inf'))
-        self.m4_motor.setVelocity(1)
+        global uri
 
-        # Sensors
-        self.imu = self.getDevice('inertial unit')
-        self.imu.enable(self.timestep)
-        self.gps = self.getDevice('gps')
-        self.gps.enable(self.timestep)
-        self.gyro = self.getDevice('gyro')
-        self.gyro.enable(self.timestep)
-        self.camera = self.getDevice('camera')
-        self.camera.enable(self.timestep)
-        self.range_front = self.getDevice('range_front')
-        self.range_front.enable(self.timestep)
-        self.range_left = self.getDevice("range_left")
-        self.range_left.enable(self.timestep)
-        self.range_back = self.getDevice("range_back")
-        self.range_back.enable(self.timestep)
-        self.range_right = self.getDevice("range_right")
-        self.range_right.enable(self.timestep)
-        self.laser_down = self.getDevice("laser_down")
-        self.laser_down.enable(self.timestep)
+        self._cf = Crazyflie(rw_cache='./cache')
 
-        # Crazyflie velocity PID controller
-        self.PID_CF = pid_velocity_fixed_height_controller()
-        self.PID_update_last_time = self.getTime()
-        self.sensor_read_last_time = self.getTime()
-        self.step_count = 0
+        # Connect some callbacks from the Crazyflie API
+        self._cf.connected.add_callback(self._connected)
+        self._cf.disconnected.add_callback(self._disconnected)
+        self._cf.connection_failed.add_callback(self._connection_failed)
+        self._cf.connection_lost.add_callback(self._connection_lost)
+        self._sensor_reading = {}
 
-        # History variables for calculating groundtruth velocity
-        self.x_global_last = 0
-        self.y_global_last = 0
+        print('Connecting to %s' % uri)
 
-        # Tools
-        self.keyboard = self.getKeyboard()
-        self.keyboard.enable(self.timestep)
+        # Try to connect to the Crazyflie
+        self._cf.open_link(uri)
 
-        # Simulation step update
-        super().step(self.timestep)
+        # Variable used to keep main loop occupied until disconnect
+        self.is_connected = True
 
-        if not enable_random_environment:
-            return
+    def _connected(self, uri):
+        """ This callback is called form the Crazyflie API when a Crazyflie
+        has been connected and the TOCs have been downloaded."""
+        print('Connected to %s' % uri)
 
-        # Set random initial position of the drone
-        init_x_drone, init_y_drone = random.uniform(0.3, 1.2), random.uniform(0.3, 2.7)
-        drone = super().getSelf()
-        translation_field = drone.getField('translation')
-        translation_field.setSFVec3f([init_x_drone, init_y_drone, 0.2])
+        # The definition of the logconfig can be made before connecting
+        self._lg_stab = LogConfig(name='Stabilizer', period_in_ms=50)
+        self._lg_stab.add_variable('stateEstimate.x', 'float')
+        self._lg_stab.add_variable('stateEstimate.y', 'float')
+        self._lg_stab.add_variable('stateEstimate.z', 'float')
+        self._lg_stab.add_variable('stabilizer.yaw', 'float')
+        self._lg_stab.add_variable('range.front')
+        self._lg_stab.add_variable('range.back')
+        self._lg_stab.add_variable('range.left')
+        self._lg_stab.add_variable('range.right')
+        self._lg_stab.add_variable('range.zrange')
 
-        # Set random initial position of the take-off pad
-        take_off_pad = super().getFromDef('TAKE_OFF_PAD')
-        translation_field = take_off_pad.getField('translation')
-        translation_field.setSFVec3f([init_x_drone, init_y_drone, 0.05])
+        # The fetch-as argument can be set to FP16 to save space in the log packet
+        # self._lg_stab.add_variable('pm.vbat', 'FP16')
 
-        # Set random initial position of the landing pad
-        init_x_landing_pad, init_y_landing_pad = random.uniform(3.8, 4.7), random.uniform(0.3, 2.7)
-        landing_pad = super().getFromDef('LANDING_PAD')
-        translation_field = landing_pad.getField('translation')
-        translation_field.setSFVec3f([init_x_landing_pad, init_y_landing_pad, 0.05])
+        # Adding the configuration cannot be done until a Crazyflie is
+        # connected, since we need to check that the variables we
+        # would like to log are in the TOC.
+        try:
+            self._cf.log.add_config(self._lg_stab)
+            # This callback will receive the data
+            self._lg_stab.data_received_cb.add_callback(self._stab_log_data)
+            # This callback will be called on errors
+            self._lg_stab.error_cb.add_callback(self._stab_log_error)
+            # Start the logging
+            self._lg_stab.start()
+        except KeyError as e:
+            print('Could not start log configuration,'
+                  '{} not found in TOC'.format(str(e)))
+        except AttributeError:
+            print('Could not add Stabilizer log config, bad configuration.')
 
-        # Set random initial positions of obstacles
-        existed_points = []
-        existed_points.append([init_x_drone, init_y_drone])
-        existed_points.append([init_x_landing_pad, init_y_landing_pad])
-        for i in range(1, 11):
-            find_appropriate_random_position = False
-            while not find_appropriate_random_position:
-                # Generate new random position
-                new_init_x_obs, new_init_y_obs = random.uniform(0.3, 4.7), random.uniform(0.3, 2.7)
-                min_distance = 1000
-                # Calculate the min distance to existed obstacles and pads
-                for point in existed_points:
-                    distance = np.linalg.norm([point[0] - new_init_x_obs, point[1] - new_init_y_obs])
-                    if distance < min_distance:
-                        min_distance = distance
-                if min_distance > 0.8:
-                    find_appropriate_random_position = True
-            # Accept position that is 0.8m far away from existed obstacles and pads
-            obstacle = super().getFromDef('OBSTACLE' + str(i))
-            translation_field = obstacle.getField('translation')
-            translation_field.setSFVec3f([new_init_x_obs, new_init_y_obs, 0.74])
-            existed_points.append([new_init_x_obs, new_init_y_obs])
+        t = Timer(50, self._cf.close_link)
+        t.start()
 
-    def wait_keyboard(self):
-        while self.keyboard.getKey() != ord('Y'):
-            super().step(self.timestep)
+    def _stab_log_error(self, logconf, msg):
+        """Callback from the log API when an error occurs"""
+        print('Error when logging %s: %s' % (logconf.name, msg))
 
-    def action_from_keyboard(self):
-        forward_velocity = 0.0
-        left_velocity = 0.0
-        yaw_rate = 0.0
-        altitude = 0.5
-        key = self.keyboard.getKey()
-        while key > 0:
-            if key == ord('W'):
-                forward_velocity = 1.0
-            elif key == ord('S'):
-                forward_velocity = -1.0
-            elif key == ord('A'):
-                left_velocity = 1.0
-            elif key == ord('D'):
-                left_velocity = -1.0
-            elif key == ord('Q'):
-                yaw_rate = 1.0
-            elif key == ord('E'):
-                yaw_rate = -1.0
-            key = self.keyboard.getKey()
-        return [forward_velocity, left_velocity, yaw_rate, altitude]
+    def _stab_log_data(self, timestamp, data, logconf):
+        """Callback from a the log API when data arrives"""
+        for name, value in data.items():
+            #print(f'{name}: {value:3.3f} ', end='')
+            self._sensor_reading[name] = value
+        #self._sensor_reading = data.items()
 
-    def read_sensors(self):
-        
-        # Data dictionary
-        data = {}
+    def _connection_failed(self, link_uri, msg):
+        """Callback when connection initial connection fails (i.e no Crazyflie
+        at the specified address)"""
+        print('Connection to %s failed: %s' % (link_uri, msg))
+        self.is_connected = False
 
-        # Time interval
-        dt = self.getTime() - self.sensor_read_last_time
-        data['t'] = self.getTime()
-        self.sensor_read_last_time = self.getTime()
+    def _connection_lost(self, link_uri, msg):
+        """Callback when disconnected after a connection has been made (i.e
+        Crazyflie moves out of range)"""
+        print('Connection to %s lost: %s' % (link_uri, msg))
 
-        # Position
-        data['x_global'] = self.gps.getValues()[0]
-        data['y_global'] = self.gps.getValues()[1]
-
-        # Attitude
-        data['roll'] = self.imu.getRollPitchYaw()[0]
-        data['pitch'] = self.imu.getRollPitchYaw()[1]
-        data['yaw'] = self.imu.getRollPitchYaw()[2]
-
-        # Velocity
-        vx_global = (data['x_global'] - self.x_global_last) / dt
-        vy_global = (data['y_global'] - self.y_global_last) / dt
-        self.x_global_last = data['x_global']
-        self.y_global_last = data['y_global']
-        data['v_forward'] =  vx_global * np.cos(data['yaw']) + vy_global * np.sin(data['yaw'])
-        data['v_left'] =  -vx_global * np.sin(data['yaw']) + vy_global * np.cos(data['yaw'])
-
-        # Range sensor
-        data['range_front'] = self.range_front.getValue() / 1000.0
-        data['range_left']  = self.range_left.getValue() / 1000.0
-        data['range_back']  = self.range_back.getValue() / 1000.0
-        data['range_right'] = self.range_right.getValue() / 1000.0
-        data['range_down'] = self.laser_down.getValue() / 1000.0
-
-        # Yaw rate
-        data['yaw_rate'] = self.gyro.getValues()[2]
-
-        return data
-
-    def reset(self):
-        # Reset the simulation
-        self.simulationResetPhysics()
-        self.simulationReset()
-        super().step(self.timestep)
-
-    def step(self, control_commands, sensor_data):
-
-        # Time interval for PID control
-        dt = self.getTime() - self.PID_update_last_time
-        self.PID_update_last_time = self.getTime()
-
-        # Low-level PID velocity control with fixed height
-        motorPower = self.PID_CF.pid(dt, control_commands, sensor_data['roll'], sensor_data['pitch'],
-                                                    sensor_data['yaw_rate'], sensor_data['range_down'],
-                                                    sensor_data['v_forward'], sensor_data['v_left'])
-        
-        # Update motor command
-        self.m1_motor.setVelocity(-motorPower[0])
-        self.m2_motor.setVelocity(motorPower[1])
-        self.m3_motor.setVelocity(-motorPower[2])
-        self.m4_motor.setVelocity(motorPower[3])
-
-        # Update drone states in simulation
-        super().step(self.timestep)
+    def _disconnected(self, link_uri):
+        """Callback when the Crazyflie is disconnected (called in all cases)"""
+        print('Disconnected from %s' % link_uri)
+        self.is_connected = False
 
 
 if __name__ == '__main__':
 
+    cflib.crtp.init_drivers()
+
+    le = Logging()
+
     # Initialize the drone
-    drone = CrazyflieInDroneDome()
+    drone = le._cf
     my_controller = MyController()
 
     # Simulation loops
     for step in range(100000):
 
         # Read sensor data including []
-        sensor_data = drone.read_sensors()
+        sensor_data = le._sensor_reading
+        if sensor_data != {}:
+            print("height :", sensor_data['range.zrange'])
 
         # Control commands with [v_forward, v_left, yaw_rate, altitude]
         # ---- Select only one of the following control methods ---- #
         # control_commands = drone.action_from_keyboard()
-        control_commands = my_controller.step_control(sensor_data)
+            control_commands = my_controller.step_control(sensor_data)
+            #print("command", control_commands)
         # control_commands = example.obstacle_avoidance(sensor_data)
         # control_commands = example.path_planning(sensor_data)
         # map = example.occupancy_map(sensor_data)
         # ---- end --- #
 
-        # print(sensor_data['range_down'])
+        #print(sensor_data['range_down'])
 
         # Update the drone status in simulation
-        drone.step(control_commands, sensor_data)
+        # drone.step(control_commands, sensor_data)
+
+            drone.commander.send_hover_setpoint(control_commands[0], control_commands[1], control_commands[2], control_commands[3])
+        time.sleep(0.01)
 
         # Grading function based on drone states and world information
