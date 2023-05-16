@@ -10,11 +10,13 @@ import numpy as np
 from enum import Enum
 import matplotlib.pyplot as plt
 
+plot = False # set to True to plot the map
+
 # Occupancy map based on distance sensor
 min_x, max_x = 0, 5.0 # meter
 min_y, max_y = 0, 3.0 # meter
 range_max = 2.0 # meter, maximum range of distance sensor
-res_pos = 0.2 # meter
+res_pos = 0.1 # meter
 conf = 0.2 # certainty given by each measurement
 t = 0 # only for plotting
 
@@ -56,7 +58,7 @@ def occupancy_map(sensor_data):
     map = np.clip(map, -1, 1) # certainty can never be more than 100%
 
     # only plot every Nth time step (comment out if not needed)
-    if t % 50 == 0:
+    if plot and t % 50 == 0:
         plt.imshow(np.flip(map,1), vmin=-1, vmax=1, cmap='gray', origin='lower') # flip the map to match the coordinate system
         plt.savefig("map.png")
     t +=1
@@ -75,10 +77,13 @@ class State(Enum):
 class MyController():
     def __init__(self):
 
-        self.speed = 0.2 # speed of the drone
-        self.cst_yaw_rate = 1.0  # constant yaw rate
-        self.SEARCH_RADIUS = 0.5 # radius of the search area around the drone
-        self.map_avoid_dist = 0.3 # distance to obstacle to trigger the avoidance
+        self.speed = 0.25 # speed of the drone
+        self.cst_yaw_rate = 1.5  # constant yaw rate
+        self.SEARCH_RADIUS = 0.8 # radius of the search area around the drone
+        self.map_avoid_dist = 0.35 # distance to obstacle to trigger the avoidance
+        self.exit_angle = np.deg2rad(2) # angle to exit the OBS_AVOID state
+        self.goal_dist_obstacle_limit = 0.4 # tolerance if goal is inside the obstacle avoidance area
+        self.prox_avoid_dist = 0.15 # distance to obstacle to trigger the avoidance
         self.goal_dir_init = 0 # direction of the goal setpoint when entering the OBS_AVOID state
         self.avoid_dir = 0 # 0 = no obstacle, 1 = obstacle on the left, -1 = obstacle on the right
 
@@ -128,8 +133,9 @@ class MyController():
             for j in range (map.shape[1]):
                 dist_map[i,j] = np.sqrt((i*res_pos - x_drone)**2 + (j*res_pos - y_drone)**2)
                 # if the distance is shorter than the radius and map value is to 1, keep the value, else set to 0
-                if dist_map[i,j] < self.SEARCH_RADIUS and map[i,j] == 1.0:
+                if dist_map[i,j] < self.SEARCH_RADIUS and map[i,j] == -1.0: # it's not logical, should work with map[i,j] == 1.0
                     # if the distance is shorter than the shortest distance, update the shortest distance and save the coordinates
+                    #dist_map[i,j] = dist_map[i,j]
                     if shortest_dist > dist_map[i,j]:
                         shortest_dist = dist_map[i,j]
                         x_closest = i*res_pos
@@ -137,12 +143,13 @@ class MyController():
                 else:
                     dist_map[i,j] = 0
 
-        print(dist_map)
-        print(map)
+        if plot and t % 50 == 0:
+            plt.imshow(np.flip(dist_map,1), vmin=0, vmax=0.5, cmap='gray', origin='lower') # flip the map to match the coordinate system
+            plt.savefig("dist_map.png")
 
-        # if no obstacle is found, return 0,0
+        # if no obstacle is found, return 0,100
         if shortest_dist == 100:
-            return 0, 0
+            return 0, shortest_dist
         else :
             # compute the direction of the closest obstacle
             direction_obs = np.arctan2(y_closest - y_drone, x_closest - x_drone)
@@ -158,7 +165,7 @@ class MyController():
             return control_command
         
         # If all setpoints were explored, explore them in the inverse order, to reach more of the space
-        if self.index_current_setpoint == len(self.setpoints)-1:
+        if self.index_current_setpoint >= len(self.setpoints)-1:
             self.inverted = True
 
         if self.counter_runnning:
@@ -232,44 +239,74 @@ class MyController():
         # left_prox = sensor_data['range_left']
         # right_prox = sensor_data['range_right']
 
+        print(self.state, self.avoid_dir)
+
+        # emergency avoidance if too close to an obstacle
+        if sensor_data['range_front'] < self.prox_avoid_dist or sensor_data['range_back'] < self.prox_avoid_dist or sensor_data['range_left'] < self.prox_avoid_dist or sensor_data['range_right'] < self.prox_avoid_dist:
+            if sensor_data['range_front'] < self.prox_avoid_dist:
+                x_command = -1
+            elif sensor_data['range_back'] < self.prox_avoid_dist:
+                x_command = 1
+            else:
+                x_command = 0
+
+            if sensor_data['range_left'] < self.prox_avoid_dist:
+                y_command = -1
+            elif sensor_data['range_right'] < self.prox_avoid_dist:
+                y_command = 1
+            else:
+                y_command = 0
+
+            control_command = [x_command*self.speed, y_command*self.speed, self.cst_yaw_rate, self.height_desired]
+            return control_command
+
         # if state == NEXT_SETPOINT or OBS_AVOID, update map & check if obstacle is close
         if self.state == State.NEXT_SETPOINT or self.state == State.OBS_AVOID:
             map = occupancy_map(sensor_data)
             dir_obstacle, dist_obstacle = self.closest_obstacle(sensor_data)
-            print(self.state, "direction obstacle", dir_obstacle, "shortest distance", dist_obstacle)
+            goal_direction = np.arctan2(y_goal - y_drone, x_goal - x_drone)
 
-        # LA YA DES GROS PROBLEM JCROIS QUE CA VIENT DE LA FONCTION CLOSEST OBSTACLE
 
-        # if self.state == State.OBS_AVOID:
-        #     # check if current goal direction is equal to the initial goal direction
-        #     if np.abs(np.arctan2(y_goal - y_drone, x_goal - x_drone) - self.goal_dir_init) < 0.1:
-        #         # exit OBS_AVOID state
-        #         self.state = State.NEXT_SETPOINT
-        #         self.avoid_dir = 0
-        #     else:
-        #         # go 90° left or right of the obstacle
-        #         x_command = np.cos(dir_obstacle + self.avoid_dir*np.pi/2)
-        #         y_command = np.sin(dir_obstacle + self.avoid_dir*np.pi/2)
-        #         control_command = self.move(x_command, y_command, sensor_data['yaw'])
-        #         return control_command
+        if self.state == State.OBS_AVOID:
+            #if goal is close to the obstacle, go to the next setpoint
+            if distance_drone_to_goal < self.goal_dist_obstacle_limit:
+                if self.inverted:
+                    self.index_current_setpoint -= 1
+                else:
+                    self.index_current_setpoint += 1
+                self.state = State.NEXT_SETPOINT
+                self.avoid_dir = 0
 
-        # # if state == NEXT_SETPOINT & close map obstacle -> OBS_AVOID
-        # if self.state == State.NEXT_SETPOINT and dist_obstacle < self.map_avoid_dist:
-        #     self.state = State.OBS_AVOID
-        #     # save current goal direction for later
-        #     self.goal_dir_init = np.arctan2(y_goal - y_drone, x_goal - x_drone)
+            # check if current goal direction is equal to the initial goal direction
+            print("angle difference :", np.abs(goal_direction - self.goal_dir_init))
+            if np.abs(goal_direction - self.goal_dir_init) < self.exit_angle/2:
+                # exit OBS_AVOID state
+                self.state = State.NEXT_SETPOINT
+                self.avoid_dir = 0
+            else:
+                # go 90° left or right of the obstacle
+                x_command = np.cos(dir_obstacle + self.avoid_dir*np.pi/2)
+                y_command = np.sin(dir_obstacle + self.avoid_dir*np.pi/2)
+                control_command = self.move(x_command, y_command, sensor_data['yaw'])
+                return control_command
 
-        #     # see if vector of closest obstacle is left or right of goal vector
-        #     if dir_obstacle - np.arctan2(y_goal - y_drone, x_goal - x_drone) > 0:
-        #         self.avoid_dir = 1
-        #     else:
-        #         self.avoid_dir = -1
+        # if state == NEXT_SETPOINT & close map obstacle & obstacle in front of drone -> OBS_AVOID
+        if self.state == State.NEXT_SETPOINT and dist_obstacle < self.map_avoid_dist and np.abs(dir_obstacle - goal_direction) < np.pi/2:
+            self.state = State.OBS_AVOID
+            # save current goal direction for later
+            self.goal_dir_init = goal_direction
 
-        #     # go 90° left or right of the obstacle
-        #     x_command = np.cos(dir_obstacle + self.avoid_dir*np.pi/2)
-        #     y_command = np.sin(dir_obstacle + self.avoid_dir*np.pi/2)
-        #     control_command = self.move(x_command, y_command, sensor_data['yaw'])
-        #     return control_command
+            # see if vector of closest obstacle is left or right of goal vector
+            if dir_obstacle - goal_direction > 0:
+                self.avoid_dir = -1
+            else:
+                self.avoid_dir = 1
+
+            # go 90° left or right of the obstacle
+            x_command = np.cos(dir_obstacle + self.avoid_dir*np.pi/2)
+            y_command = np.sin(dir_obstacle + self.avoid_dir*np.pi/2)
+            control_command = self.move(x_command, y_command, sensor_data['yaw'])
+            return control_command
             
         # direction command to next setpoint
         if self.state == State.NEXT_SETPOINT:
