@@ -5,6 +5,7 @@ mode = {DUMB, SILLY}
 ## state
 - enum state = {LIFT-OFF, GO-TO-LANDING-REGION, SCANNING-LANDING-PAD} : state machine
 - int z-history[100] : record the last 100 z range measurement
+- int z-counter = 0
 
 ## preplanned-path
 - int preplanned-path [n-step * 2]: [step0-x, step0-y, step1-x, step1-y, step2-x, step2-y, ...]
@@ -31,22 +32,45 @@ mode = {DUMB, SILLY}
 	- higher value means more certainty there is no landing pad inside in the cell
 	- this value is increased every time the SillyFly fly over the cell (thus increase the certainty no pad is located in the cell)
 
-# function find-most-interesting-cell()
+# function [int, int] find-most-interesting-cell()
 return most-interesting-cell = closest-cell-free-and-not-explored(map)
 
-# function check-z
+# function bool check-z()
+z-mean = mean(z-history)
+z-history[z-counter] = range-down()
+if (z-mean - z-history[z-counter]) > some-threshold
+	z-counter++
+	return true
+else
+	z-counter++
+	return false
+
 
 # main loop
-## if state == SCANNING-LANDING-PAD
-	if goal-reached == True
-		if mode == SILLY
-			cell-to-explore = find-most-interesting-cell()
-		else if mode == DUMB
-			while obstacle[preplanned-path[i].coords] != -1
-				i++ : skip if cell blocked by obstacle
-			cell-to-explore = preplanned-path[i]
-		i++ increment the counter for future step
-		goal-reached = False
-	if dist(cell-to-explore, current-pos) < 10cm
-		goal-reached = True
-check-z()
+switc state
+	case TAKE-OFF-1
+		
+	case TRAVEL-TO-LANDING-REGION
+
+	case SCANNING-LANDING-PAD
+		if goal-reached == True
+			if mode == SILLY
+				cell-to-explore = find-most-interesting-cell()
+			else if mode == DUMB
+				while obstacle[preplanned-path[i].coords] != -1
+					i++ : skip if cell blocked by obstacle
+				cell-to-explore = preplanned-path[i]
+			i++ increment the counter for future step
+			goal-reached = False
+		if dist(cell-to-explore, current-pos) < 10cm
+			goal-reached = True
+	case LAND-1
+
+	case TAKE-OFF-2
+
+	case TRAVEL-TO-TAKE-OFF-PAD
+	
+	CASE LAND-2
+
+if check-z()
+	state = LAND
