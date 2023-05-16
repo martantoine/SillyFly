@@ -9,6 +9,7 @@
 import numpy as np
 from enum import Enum
 import matplotlib.pyplot as plt
+import keyboard
 
 plot = False # set to True to plot the map
 
@@ -77,15 +78,22 @@ class State(Enum):
 class MyController():
     def __init__(self):
 
-        self.speed = 0.25 # speed of the drone
-        self.cst_yaw_rate = 1.5  # constant yaw rate
+        self.speed = 0.2 # speed of the drone
+        self.yaw_p = 1  # proprtional yaw control
+        self.yaw_i = 0.2 # integral yaw control
+        self.yaw_i_prev = 0.0 # previous integral term
+        self.max_yaw_rate = 2.0 # maximum yaw rate
         self.SEARCH_RADIUS = 0.8 # radius of the search area around the drone
-        self.map_avoid_dist = 0.35 # distance to obstacle to trigger the avoidance
+        self.map_avoid_dist = 0.3 # distance to obstacle to trigger the avoidance
         self.exit_angle = np.deg2rad(2) # angle to exit the OBS_AVOID state
-        self.goal_dist_obstacle_limit = 0.4 # tolerance if goal is inside the obstacle avoidance area
+        self.goal_dist_obstacle_limit = 0.5 # tolerance if goal is inside the obstacle avoidance area
         self.prox_avoid_dist = 0.15 # distance to obstacle to trigger the avoidance
         self.goal_dir_init = 0 # direction of the goal setpoint when entering the OBS_AVOID state
         self.avoid_dir = 0 # 0 = no obstacle, 1 = obstacle on the left, -1 = obstacle on the right
+        self.yaw_amp = np.deg2rad(15) # amplitude of the yaw oscillation
+        self.yaw_freq = 3 # frequency of the yaw oscillation
+        #self.yaw_limit = np.deg2rad(30) # limit of the yaw oscillation
+        self.t = 0 # time of the yaw oscillation
 
         self.start = True
         self.inverted =  False
@@ -110,14 +118,41 @@ class MyController():
         self.x_landing = 0
         self.y_landing = 0
 
-    # function that makes the drone move in a given direction while rotating at a constant speed
+    def yaw_PI(self, yaw_error):
+        yaw_p = self.yaw_p*yaw_error
+        yaw_i = self.yaw_i_prev + self.yaw_i*yaw_error
+
+        # limit the integral term
+        if yaw_i > self.max_yaw_rate:
+            yaw_i = self.max_yaw_rate
+        elif yaw_i < -self.max_yaw_rate:
+            yaw_i = -self.max_yaw_rate
+
+        self.yaw_i_prev = yaw_i
+
+        yaw_rate = yaw_p + yaw_i
+
+        # limit the yaw rate
+        if yaw_rate > self.max_yaw_rate:
+            yaw_rate = self.max_yaw_rate
+        elif yaw_rate < -self.max_yaw_rate:
+            yaw_rate = -self.max_yaw_rate
+        return yaw_rate
+
+    # function that makes the drone move in a given direction while oscilating around the direction
     def move(self, x, y, sensor_yaw):
-        norm = np.linalg.norm([x, y])
+        # compute the direction of the drone
         direction_map = np.arctan2(y, x)
         direction_robot = direction_map - sensor_yaw
+        # compute the speed of the drone
         x_command = self.speed * np.cos(direction_robot)
         y_command = self.speed * np.sin(direction_robot)
-        control_command = [x_command, y_command, self.cst_yaw_rate, self.height_desired]
+        # compute the yaw angle to follow
+        yaw = direction_map + self.yaw_amp * np.sin(2*np.pi*self.yaw_freq*self.t)
+        self.t += 0.01
+        yaw_error = yaw - sensor_yaw
+        yaw_rate = self.yaw_PI(yaw_error)
+        control_command = [x_command, y_command, yaw_rate, self.height_desired]
         return control_command
         
     # returns the direction and distance of the closest 1 on the map, returns distance 0 if no 1 closest than RADIUS
@@ -159,6 +194,16 @@ class MyController():
     def step_control(self, sensor_data):
         global map
 
+        # if detects Q key, land and stop the program
+        if keyboard.is_pressed('q'):
+            self.state = State.LANDING
+            self.landing_found = True
+            self.counter_runnning = False
+            self.count = 0
+            self.height_desired -= 0.005
+            control_command = [0.0, 0.0, 0.0, self.height_desired]
+            return control_command
+
         #if programm finished, do nothing
         if self.state == State.END:
             control_command = [0.0, 0.0, 0.0, self.height_desired]
@@ -177,7 +222,8 @@ class MyController():
             control_command = [0.0, 0.0, 0.0, self.height_desired]
             return control_command
         elif self.state == State.ON_GROUND:
-            self.state = State.NEXT_SETPOINT
+            self.state = State.ROTATE
+            self.t = 0
             self.counter_runnning = True
             self.count = 0
             if self.start: # save the landing pad position
@@ -231,7 +277,8 @@ class MyController():
             else:
                 self.index_current_setpoint += 1
             self.avoid_dir = 0
-            self.state = State.NEXT_SETPOINT
+            self.state = State.ROTATE
+            self.t = 0
 
         #get proximity sensor data
         # front_prox = sensor_data['range_front']
@@ -257,11 +304,11 @@ class MyController():
             else:
                 y_command = 0
 
-            control_command = [x_command*self.speed, y_command*self.speed, self.cst_yaw_rate, self.height_desired]
+            control_command = [x_command*self.speed/2, y_command*self.speed/2, 0, self.height_desired]
             return control_command
 
         # if state == NEXT_SETPOINT or OBS_AVOID, update map & check if obstacle is close
-        if self.state == State.NEXT_SETPOINT or self.state == State.OBS_AVOID:
+        if self.state == State.NEXT_SETPOINT or self.state == State.ROTATE or self.state == State.OBS_AVOID:
             map = occupancy_map(sensor_data)
             dir_obstacle, dist_obstacle = self.closest_obstacle(sensor_data)
             goal_direction = np.arctan2(y_goal - y_drone, x_goal - x_drone)
@@ -274,7 +321,8 @@ class MyController():
                     self.index_current_setpoint -= 1
                 else:
                     self.index_current_setpoint += 1
-                self.state = State.NEXT_SETPOINT
+                self.state = State.ROTATE
+                self.t = 0
                 self.avoid_dir = 0
 
             # check if current goal direction is equal to the initial goal direction
@@ -291,7 +339,7 @@ class MyController():
                 return control_command
 
         # if state == NEXT_SETPOINT & close map obstacle & obstacle in front of drone -> OBS_AVOID
-        if self.state == State.NEXT_SETPOINT and dist_obstacle < self.map_avoid_dist and np.abs(dir_obstacle - goal_direction) < np.pi/2:
+        if (self.state == State.NEXT_SETPOINT or self.state == State.ROTATE) and dist_obstacle < self.map_avoid_dist and np.abs(dir_obstacle - goal_direction) < np.pi/2:
             self.state = State.OBS_AVOID
             # save current goal direction for later
             self.goal_dir_init = goal_direction
@@ -307,6 +355,19 @@ class MyController():
             y_command = np.sin(dir_obstacle + self.avoid_dir*np.pi/2)
             control_command = self.move(x_command, y_command, sensor_data['yaw'])
             return control_command
+        
+        # if state == ROTATE, rotate until yaw is close to the goal direction
+        if self.state == State.ROTATE:
+            # if the yaw is close to the goal direction, exit ROTATE state
+            yaw_error = goal_direction - sensor_data['yaw']
+            yaw_rate = self.yaw_PI(yaw_error)
+            if np.abs(yaw_error) < self.exit_angle:
+                self.state = State.NEXT_SETPOINT
+                self.avoid_dir = 0
+            else:
+                # rotate in the direction of the goal
+                control_command = [0.0, 0.0, yaw_rate, self.height_desired]
+                return control_command
             
         # direction command to next setpoint
         if self.state == State.NEXT_SETPOINT:
