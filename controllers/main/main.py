@@ -91,7 +91,7 @@ class Logging:
         t = Timer(50, self._cf.close_link)
         t.start()
 
-    def _stab_log_error(self, logconf, msg):
+    def _stab_log_error(self, logconf, msg): 
         """Callback from the log API when an error occurs"""
         print('Error when logging %s: %s' % (logconf.name, msg))
 
@@ -129,6 +129,8 @@ if __name__ == '__main__':
     drone = le._cf
     my_controller = MyController()
 
+    control_commands = [0, 0, 0, 0]
+
     # Simulation loops
     for step in range(100000):
 
@@ -141,11 +143,9 @@ if __name__ == '__main__':
             # ---- Select only one of the following control methods ---- #
             # control_commands = drone.action_from_keyboard()or_data['range.zrange'])
 
-
-            control_commands = my_controller.step_control(sensor_data)
             #print("command", control_commands)
             # control_commands = example.obstacle_avoidance(sensor_data)
-            # control_commands = example.path_planning(sensor_data)
+            # control_commands = example.path_plan ning(sensor_data)
             # map = example.occupancy_map(sensor_data)
             # ---- end --- #
 
@@ -156,10 +156,12 @@ if __name__ == '__main__':
 
             # Send control commands to the drone
             if control_commands[3] != -1:
+                control_commands = my_controller.step_control(sensor_data)
                 drone.commander.send_hover_setpoint(control_commands[0], control_commands[1], control_commands[2], control_commands[3])
             else: #stop the motors and exit the program
                 drone.commander.send_stop_setpoint()
-                break 
+                break
+                
 
         time.sleep(0.01)
 
