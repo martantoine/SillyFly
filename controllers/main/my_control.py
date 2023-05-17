@@ -8,6 +8,7 @@
 
 import numpy as np
 from enum import Enum
+import keyboard
 
 class State(Enum):
     ON_GROUND = 0
@@ -49,9 +50,19 @@ class MyController():
     # Don't change the method name of 'step_control'
     def step_control(self, sensor_data):
 
+        # if detects Q key, land and stop the program
+        if keyboard.is_pressed('space'):
+            self.state = State.LANDING
+            self.landing_found = True
+            self.counter_runnning = False
+            self.count = 0
+            self.height_desired -= 0.005
+            control_command = [0.0, 0.0, 0.0, self.height_desired]
+            return control_command
+
         #if programm finished, do nothing
         if self.state == State.END:
-            control_command = [0.0, 0.0, 0.0, self.height_desired]
+            control_command = [0.0, 0.0, 0.0, -1] # -1 means stop motors
             return control_command
         
         # If all setpoints were explored, explore them in the inverse order, to reach more of the space
@@ -62,18 +73,19 @@ class MyController():
             self.count += 1
 
         # Take off
-        if self.state == State.ON_GROUND and sensor_data['range.zrange'] < 490:
-            self.height_desired = self.flying_height
-            control_command = [0.0, 0.0, 0.0, self.height_desired]
-            return control_command
-        elif self.state == State.ON_GROUND:
-            self.state = State.ROTATE
-            self.counter_runnning = True
-            self.count = 0
-            if self.start: # save the landing pad position
-                self.start = False
-                self.x_landing = sensor_data['stateEstimate.x'] + self.x_ini
-                self.y_landing = sensor_data['stateEstimate.y'] + self.y_ini
+        if self.state == State.ON_GROUND:
+            if sensor_data['range.zrange'] < 490:
+                self.height_desired = self.flying_height
+                control_command = [0.0, 0.0, 0.0, self.height_desired]
+                return control_command
+            else:
+                self.state = State.ROTATE
+                self.counter_runnning = True
+                self.count = 0
+                if self.start: # save the landing pad position
+                    self.start = False
+                    self.x_landing = sensor_data['stateEstimate.x'] + self.x_ini
+                    self.y_landing = sensor_data['stateEstimate.y'] + self.y_ini
         
         # Land
         if self.state == State.LANDING:
@@ -88,6 +100,7 @@ class MyController():
             control_command = [0.0, 0.0, 0.0, self.height_desired]
             return control_command
         # Landing command
+
         #wait for the robot to be stable (count > 100), then wait the detection of the landing pad to send the landing order
         if self.state == State.NEXT_SETPOINT and not self.landing_found and self.count > 120 and sensor_data['range.zrange'] < 0.45:
             self.state = State.LANDING

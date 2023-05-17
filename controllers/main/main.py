@@ -132,27 +132,35 @@ if __name__ == '__main__':
     # Simulation loops
     for step in range(100000):
 
-        # Read sensor data including []
+        # Read sensor data
         sensor_data = le._sensor_reading
-        if sensor_data != {}:
-            print("height :", sensor_data['range.zrange'])
 
-        # Control commands with [v_forward, v_left, yaw_rate, altitude]
-        # ---- Select only one of the following control methods ---- #
-        # control_commands = drone.action_from_keyboard()
+        # data received : conection successful
+        if sensor_data != {}: 
+            #print("height :", sens            # Control commands with [v_forward, v_left, yaw_rate, altitude]
+            # ---- Select only one of the following control methods ---- #
+            # control_commands = drone.action_from_keyboard()or_data['range.zrange'])
+
+
             control_commands = my_controller.step_control(sensor_data)
             #print("command", control_commands)
-        # control_commands = example.obstacle_avoidance(sensor_data)
-        # control_commands = example.path_planning(sensor_data)
-        # map = example.occupancy_map(sensor_data)
-        # ---- end --- #
+            # control_commands = example.obstacle_avoidance(sensor_data)
+            # control_commands = example.path_planning(sensor_data)
+            # map = example.occupancy_map(sensor_data)
+            # ---- end --- #
 
-        #print(sensor_data['range_down'])
+            #print(sensor_data['range_down'])
 
-        # Update the drone status in simulation
-        # drone.step(control_commands, sensor_data)
+            # Update the drone status in simulation
+            # drone.step(control_commands, sensor_data)
 
-            drone.commander.send_hover_setpoint(control_commands[0], control_commands[1], control_commands[2], control_commands[3])
+            # Send control commands to the drone
+            if control_commands[3] != -1:
+                drone.commander.send_hover_setpoint(control_commands[0], control_commands[1], control_commands[2], control_commands[3])
+            else: #stop the motors and exit the program
+                drone.commander.send_stop_setpoint()
+                break 
+
         time.sleep(0.01)
 
         # Grading function based on drone states and world information
