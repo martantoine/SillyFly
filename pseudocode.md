@@ -12,6 +12,8 @@ landing-x-min = 3.5
 - enum state = {LIFT-OFF-1, GO-TO-LANDING-REGION, SCANNING-LANDING-PAD, LAND-1, TAKE-OFF-2, GO-TO-TAKE-OFF-PAD, LAND-2} : state machine
 - int z-history[100] : record the last 100 z range measurement
 - int z-counter = 0
+- coord global-goal
+- coord local-goals[] #dynamic sized array, size depend on the generated path by the A*
 
 ## preplanned-path
 - int preplanned-path [n-step * 2]: [step0-x, step0-y, step1-x, step1-y, step2-x, step2-y, ...]
@@ -65,15 +67,20 @@ switc state
 		if(abs(current-pos.z - z-desired) < some-threshold)
 			state = GO-TO-LANDING-REGION
 	case GO-TO-LANDING-REGION
-		if(dist(current-pos, path-goal) > lateral-threshold
-			command.yaw = angle(current-pos, path-goal) + sin(step) * 20 / 90
-			if(angle(current-pos, path-goal) < angle-threshold)
+		if(dist(current-pos, local-goal) > lateral-threshold
+			command.yaw = angle(current-pos, local-goal) + sin(step) * 20 / 90
+			if(angle(current-pos, local-goal) < angle-threshold)
 				command.vx = lateral-speed
 		else
 			if(current-pos-x > landing-x-min)
 				state = SCANNING-LANDING-PAD
 			else
-				path-goal = find-x-positive-free-cell()
+				if(!global-goals.empty())
+					local-goal = global-goals[0]
+					global-goals.pop_first()
+				else
+					global-goal = find-x-positive-free-cell()
+					globals-path = a-star(current-pos, global-goal)
 	case SCANNING-LANDING-PAD
 		if goal-reached == True
 			if mode == SILLY
@@ -84,10 +91,23 @@ switc state
 				cell-to-explore = preplanned-path[i]
 			i++ increment the counter for future step
 			goal-reached = False
-		if dist(cell-to-explore, current-pos) < 10cm
+		if dist(cell-to-explore, current-pos) < lateral-threshold
 			goal-reached = True
+		else
+			if(dist(current-pos, path-goal) > lateral-threshold
+				command.yaw = angle(current-pos, path-goal) + sin(step) * 20 / 90
+				if(angle(current-pos, path-goal) < angle-threshold)
+					command.vx = lateral-speed
+			else
+				if(current-pos-x > landing-x-min)
+					state = SCANNING-LANDING-PAD
+			else
+				path-goal = find-x-positive-free-cell()
 	case LAND-1
-
+		if(current-pos.z > some-threshold)
+			command.z = current-pos.z - z-step
+		else
+			state = TAKE-OFF-2
 	case TAKE-OFF-2
 
 	case GO-TO-TAKE-OFF-PAD
