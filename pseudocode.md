@@ -1,9 +1,15 @@
 # Super variables
 mode = {DUMB, SILLY}
+z-step = 0.05
+z-threshold = 0.1
+lateral-threshold = 0.1
+lateral-speed = 0.2
+angle-threshold = deg2rad(5)
+landing-x-min = 3.5
 
 # Global variables
 ## state
-- enum state = {LIFT-OFF, GO-TO-LANDING-REGION, SCANNING-LANDING-PAD} : state machine
+- enum state = {LIFT-OFF-1, GO-TO-LANDING-REGION, SCANNING-LANDING-PAD, LAND-1, TAKE-OFF-2, GO-TO-TAKE-OFF-PAD, LAND-2} : state machine
 - int z-history[100] : record the last 100 z range measurement
 - int z-counter = 0
 
@@ -47,11 +53,27 @@ else
 
 
 # main loop
+command = {0, 0, 0, 0} #vx, vy, yaw, z ||||| default command
+
+if(z-desired - current-pos.z < some-threshold)
+	command.z = current-pos.z + z-step
+elif(current-pos.z - z-desired < some-threshold)
+	command.z = current-pos.z - z-step
+		
 switc state
 	case TAKE-OFF-1
-		
-	case TRAVEL-TO-LANDING-REGION
-
+		if(abs(current-pos.z - z-desired) < some-threshold)
+			state = GO-TO-LANDING-REGION
+	case GO-TO-LANDING-REGION
+		if(dist(current-pos, path-goal) > lateral-threshold
+			command.yaw = angle(current-pos, path-goal) + sin(step) * 20 / 90
+			if(angle(current-pos, path-goal) < angle-threshold)
+				command.vx = lateral-speed
+		else
+			if(current-pos-x > landing-x-min)
+				state = SCANNING-LANDING-PAD
+			else
+				path-goal = find-x-positive-free-cell()
 	case SCANNING-LANDING-PAD
 		if goal-reached == True
 			if mode == SILLY
@@ -68,7 +90,7 @@ switc state
 
 	case TAKE-OFF-2
 
-	case TRAVEL-TO-TAKE-OFF-PAD
+	case GO-TO-TAKE-OFF-PAD
 	
 	CASE LAND-2
 
