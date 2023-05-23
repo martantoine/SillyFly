@@ -3,7 +3,7 @@ Controller for the Crazyflie 2.1, using the high-level commander API.
 modified from the example of the crazyflie lib
 
 Modified by: Alec Parrat
-last modified: 2023-05-17
+last modified: 2023-05-23
 
 units of sensor data:
 
@@ -31,10 +31,24 @@ from enum import Enum
 import keyboard
 from matplotlib import pyplot as plt
 
-plot = True # plot the yaw controller & other data
-x_landing, y_landing = 0.0, 1.5 # Initial landing pad position
+class Gait(Enum): # gait of the robot
+    STATIC = 0
+    STRAIGHT = 1
+    OSCILLATION = 2
 
-class State(Enum):
+
+"""
+Global parameters to change
+"""
+x_landing, y_landing = 0.0, 0.0 # Initial landing pad position
+gait = Gait.STRAIGHT # Gait of the robot
+
+plot = False # plot the yaw controller & other data
+plot_path = False # plot the path of the robot
+plot_PID = False # plot the PID controller
+
+
+class State(Enum): # state machine for the high-level control
     ON_GROUND = 0
     LANDING = 1
     NEXT_SETPOINT = 2
@@ -47,7 +61,7 @@ class State(Enum):
 # Don't change the class name of 'MyController'
 class MyController():
     def __init__(self):
-        global plot, x_landing, y_landing
+        global x_landing, y_landing
 
         self.inverted =  False
         self.landing_found = False
@@ -65,6 +79,11 @@ class MyController():
         self.max_yaw_rate = 2*360.0
         self.speed = 0.3
 
+        # if gait == OSCILLATION, the robot will oscillate around the desired direction
+        self.amp_oscillation = 30 # [deg]
+        self.freq_oscillation = 1.0 # [Hz]
+        self.count_pid = 0.0
+
         # plot table
         self.yaw_error_table = []
         self.yaw_prop_table = []
@@ -79,7 +98,8 @@ class MyController():
 
         # initial path planning (no obstacle known)
         self.max_distance_setpoints = 0.25
-        self.init_setpoints = [[x_landing, y_landing], [3.7, 0.1], [3.7, 2.9], [4.0, 2.9], [4.0, 0.1], [4.3, 0.1], [4.3, 2.9], [4.6, 2.9], [4.6, 0.1], [4.9, 0.1], [4.9,2.9]]
+        self.init_setpoints = [[x_landing, y_landing], [0.5, 0.1], [0.5, 0.5], [0.8, 0.5], [0.8, 0.0]] # test path
+        #self.init_setpoints = [[x_landing, y_landing], [3.7, 0.1], [3.7, 2.9], [4.0, 2.9], [4.0, 0.1], [4.3, 0.1], [4.3, 2.9], [4.6, 2.9], [4.6, 0.1], [4.9, 0.1], [4.9,2.9]]
         self.setpoints = self.path_interpolate(self.init_setpoints) # adding sethpoints to have less than max_distance_setpoints between each setpoint
         self.index_current_setpoint = 0
 
@@ -90,8 +110,6 @@ class MyController():
         """
         final_setpoints = []
         for current in init_setpoints:
-            if plot:
-                print(current)
             if current != init_setpoints[0]: # exept first setpoint 
                 # check distance with previous setpoint
                 delta_x = current[0] - previous[0]
@@ -109,8 +127,10 @@ class MyController():
             final_setpoints.append(current) # also add current setpoint, even for the first one
             previous = current # store the current setpoint for comparison with the next
 
-        if plot : # print the path + interpolated setpoints
-            print(final_setpoints)
+        # remove the first setpoint (useless)
+        final_setpoints.pop(0)
+        
+        if plot_path : # print the path + interpolated setpoints
             x = []
             y = []
             for i in final_setpoints:
@@ -134,7 +154,7 @@ class MyController():
         """
         global plot
 
-        yaw_error = -(yaw_command - sensor_data['stabilizer.yaw'])
+        yaw_error = - (yaw_command - sensor_data['stabilizer.yaw'])
         if yaw_error > 180:
             yaw_error -= 360
         elif yaw_error < -180:
@@ -158,7 +178,7 @@ class MyController():
         elif yaw_rate < -self.max_yaw_rate:
             yaw_rate = -self.max_yaw_rate
 
-        if plot:
+        if plot_PID:
             print("yaw error : ", yaw_error, " | yaw rate : ", yaw_rate, " | yaw prop : ", yaw_prop, " | yaw int : ", yaw_int)
             # save error, prop, int, yaw_rate in table to plot at the end
             self.yaw_error_table.append(yaw_error)
@@ -169,7 +189,7 @@ class MyController():
 
         return yaw_rate
 
-    def move(self, direction, face, sensor_data):
+    def move(self, direction, sensor_data):
         """
         move the robot in the given direction
 
@@ -181,11 +201,22 @@ class MyController():
         output :
         control_command : [v_forward, v_left, yaw_rate, height_desired]
         """
+
+        global gait
         
-        if face:
-            yaw_rate = self.yaw_controller(direction, sensor_data)
+
+        if gait == Gait.STATIC:
+            dir2face = 0.0
+        elif gait == Gait.STRAIGHT:
+            dir2face = direction
+        elif gait == Gait.OSCILLATION:
+            dir2face = direction + self.amp_oscillation * np.sin(2*np.pi*self.freq_oscillation*self.count_pid)
+            self.count_pid += 0.02
+            print("dir2face : ", dir2face, " | count : ", self.count_pid)
         else:
-            yaw_rate = 0
+            print("ERROR : unknown gait")
+
+        yaw_rate = self.yaw_controller(dir2face, sensor_data)
 
         # compute the forward & left speed of the robot according to the desired direction and the current yaw
         direction_robot = direction - sensor_data['stabilizer.yaw']
@@ -193,7 +224,6 @@ class MyController():
             direction_robot -= 360
         elif direction_robot < -180:
             direction_robot += 360
-
         v_forward = np.cos(np.deg2rad(direction_robot)) * self.speed
         v_left = np.sin(np.deg2rad(direction_robot)) * self.speed
 
@@ -210,6 +240,9 @@ class MyController():
         """
 
         global plot, x_landing, y_landing
+
+        if plot:
+            print(self.state)
 
         # if detects Q key, land and stop the program, must be the first condition in the function
         if self.state != State.EMERGENCY and keyboard.is_pressed('space'):
@@ -230,6 +263,14 @@ class MyController():
         
         # if the the drone is in END state, stop the motors
         if self.state == State.END:
+            if plot_PID:#plot PID controller
+                plt.plot(self.yaw_error_table, label="yaw error")
+                plt.plot(self.yaw_prop_table, label="yaw prop")
+                plt.plot(self.yaw_int_table, label="yaw int")
+                plt.plot(self.yaw_der_table, label="yaw der")
+                plt.plot(self.yaw_rate_table, label="yaw rate")
+                plt.legend()
+                plt.show()
             control_command = [0.0, 0.0, 0.0, -1] # stop the motors
             return control_command
         
@@ -244,18 +285,18 @@ class MyController():
         if self.state == State.TEST:
             if self.count < 2*40:
                 print("FORWARD")
-                dir = 0
+                dir = 0.0
             elif self.count < 4*40:
                 print("LEFT")
-                dir = 90
+                dir = 90.0
             elif self.count < 6*40:
                 print("BACK")
-                dir = 180
+                dir = 180.0
             elif self.count < 8*40:
                 print("RIGHT")
-                dir = -90
+                dir = -90.0
             else:
-                dir = 0
+                dir = 0.0
                 self.state = State.LANDING
                 self.landing_found = True
                 self.counter_runnning = False
@@ -286,16 +327,6 @@ class MyController():
                 if self.landing_found: # end of the program
                     self.state = State.END
 
-                    #plot table
-                    if plot:
-                        plt.plot(self.yaw_error_table, label="yaw error")
-                        plt.plot(self.yaw_prop_table, label="yaw prop")
-                        plt.plot(self.yaw_int_table, label="yaw int")
-                        plt.plot(self.yaw_der_table, label="yaw der")
-                        plt.plot(self.yaw_rate_table, label="yaw rate")
-                        plt.legend()
-                        plt.show()
-
                     control_command = [0.0, 0.0, 0.0, -1] # -1 means stop motors
                     return control_command
                 else: # landing pad found
@@ -307,7 +338,7 @@ class MyController():
         # Landing command
 
         #wait for the robot to be stable (count > 100), then wait the detection of the landing pad to send the landing order
-        if self.state == State.NEXT_SETPOINT and not self.landing_found and self.count > 120 and sensor_data['range.zrange'] < 450:
+        if self.state == State.NEXT_SETPOINT and not self.landing_found and self.count > 120 and sensor_data['range.zrange'] < 470:
             self.state = State.LANDING
             self.counter_runnning = False
             self.count = 0
@@ -321,7 +352,7 @@ class MyController():
         else:
             x_goal, y_goal = self.setpoints[self.index_current_setpoint]
 
-        x_drone, y_drone = sensor_data['stateEstimate.x'] + self.x_ini, sensor_data['stateEstimate.y'] + self.y_ini
+        x_drone, y_drone = sensor_data['stateEstimate.x'] + x_landing, sensor_data['stateEstimate.y'] + y_landing
         distance_drone_to_goal = np.linalg.norm([x_goal - x_drone, y_goal- y_drone])
 
         # When the drone reaches the goal setpoint, e.g., distance < 0.1m
@@ -339,17 +370,23 @@ class MyController():
             else:
                 self.index_current_setpoint += 1
             self.avoid_dir = 0
-            self.state = State.ROTATE
+            # if the gait is static, no need to rotate, when oscillation, don't want to rotate
+            if gait == Gait.STATIC or gait == Gait.OSCILLATION:
+                self.state = State.NEXT_SETPOINT
+                self.count_pid = 0.0
+            else:
+                self.state = State.ROTATE
             
         #if state == ROTATE, rotate until the drone is facing the next setpoint
         if self.state == State.ROTATE:
             #compute yaw_rate to head in direction of the next setpoint
-            yaw_rate = self.yaw_controller(np.rad2deg(np.arctan2(y_goal - y_drone, x_goal - x_drone)), sensor_data['stabilizer.yaw'])            
-            if abs(yaw_rate) > 0.1:
+            yaw_rate = self.yaw_controller(np.rad2deg(np.arctan2(y_goal - y_drone, x_goal - x_drone)), sensor_data)            
+            if abs(yaw_rate) > 4:
                 control_command = [0.0, 0.0, yaw_rate, self.height_desired]
                 return control_command
             else:
                 self.state = State.NEXT_SETPOINT
+                self.count_pid = 0.0
 
         #get proximity sensor data
         front_prox = sensor_data['range.front']
@@ -394,10 +431,7 @@ class MyController():
             
         # direction command to next setpoint
         if self.state == State.NEXT_SETPOINT:
-            #compute yaw_rate to head in direction of the next setpoint
-            yaw_rate = self.yaw_controller(np.rad2deg(np.arctan2(y_goal - y_drone, x_goal - x_drone)), sensor_data['stabilizer.yaw'])
-            # go straight to the next setpoint
-            control_command = [0.25, 0, yaw_rate, self.height_desired]
+            control_command = self.move(np.rad2deg(np.arctan2(y_goal - y_drone, x_goal - x_drone)), sensor_data)
             return control_command
 
         #default, hover
