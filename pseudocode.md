@@ -82,17 +82,20 @@ switc state
 					global-goal = find-x-positive-free-cell()
 					globals-path = a-star(current-pos, global-goal)
 	case SCANNING-LANDING-PAD
-		if goal-reached == True
-			if mode == SILLY
-				cell-to-explore = find-most-interesting-cell()
-			else if mode == DUMB
-				while obstacle[preplanned-path[i].coords] != -1
-					i++ : skip if cell blocked by obstacle
-				cell-to-explore = preplanned-path[i]
-			i++ increment the counter for future step
-			goal-reached = False
-		if dist(cell-to-explore, current-pos) < lateral-threshold
+		if dist(local-goal, current-pos) < lateral-threshold
 			goal-reached = True
+			if(!global-goals.empty())
+				local-goal = global-goals[0]
+				global-goals.pop_first()
+			else
+				if mode == SILLY
+					global-goal = find-most-interesting-cell()
+				else if mode == DUMB
+					while obstacle[preplanned-path[i].coords] != -1
+						i++ : skip if cell blocked by obstacle
+					global-goal = preplanned-path[i]
+					i++ increment the counter for future step
+				globals-path = a-star(current-pos, global-goal)
 		else
 			if(dist(current-pos, path-goal) > lateral-threshold
 				command.yaw = angle(current-pos, path-goal) + sin(step) * 20 / 90
