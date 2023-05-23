@@ -1,12 +1,26 @@
 import numpy as np
+import matplotlib.pyplot as plt
+
+# Occupancy map based on distance sensor, A CHANGER LES VALEURS SELON LA TAILLE DE NOTRE ENVIRONNEMENT
+min_x, max_x = 0, 5.0 # meter
+min_y, max_y = 0, 5.0 # meter
+range_max = 2.0 # meter, maximum range of distance sensor
+res_pos = 0.2 # meter
+conf = 0.2 # certainty given by each measurement
+t = 0 # only for plotting
 
 map = np.zeros((int((max_x-min_x)/res_pos), int((max_y-min_y)/res_pos))) # 0 = unknown, 1 = free, -1 = occupied
 
 def occupancy_map(sensor_data):
+    """
+    input: sensor_data
+    Define the occupancy map as the drone moves around the environment
+    output: map
+    """
     global map, t
-    pos_x = sensor_data['x_global']
-    pos_y = sensor_data['y_global']
-    yaw = sensor_data['yaw']
+    pos_x = sensor_data['stateEstimate.x']
+    pos_y = sensor_data['stateEstimate.y']
+    yaw = sensor_data['stabilizer.yaw']
     
     for j in range(4): # 4 sensors
         yaw_sensor = yaw + j*np.pi/2 #yaw positive is counter clockwise
