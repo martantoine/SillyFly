@@ -26,12 +26,13 @@ height : [m]
 counter : 40 =~ 1s
 """
 
-plot = False
-
 import numpy as np
 from enum import Enum
 import keyboard
 from matplotlib import pyplot as plt
+
+plot = True # plot the yaw controller & other data
+x_landing, y_landing = 0.0, 1.5 # Initial landing pad position
 
 class State(Enum):
     ON_GROUND = 0
@@ -46,10 +47,8 @@ class State(Enum):
 # Don't change the class name of 'MyController'
 class MyController():
     def __init__(self):
-        self.x_ini = 0
-        self.y_ini = 0
+        global plot, x_landing, y_landing
 
-        self.start = True
         self.inverted =  False
         self.landing_found = False
 
@@ -78,13 +77,11 @@ class MyController():
 
         self.state = State.ON_GROUND
 
+        # initial path planning (no obstacle known)
         self.max_distance_setpoints = 0.25
-        self.init_setpoints = [[3.7, 0.1], [3.7, 2.9], [4.0, 2.9], [4.0, 0.1], [4.3, 0.1], [4.3, 2.9], [4.6, 2.9], [4.6, 0.1], [4.9, 0.1], [4.9,2.9]]
-        self.setpoints = []
+        self.init_setpoints = [[x_landing, y_landing], [3.7, 0.1], [3.7, 2.9], [4.0, 2.9], [4.0, 0.1], [4.3, 0.1], [4.3, 2.9], [4.6, 2.9], [4.6, 0.1], [4.9, 0.1], [4.9,2.9]]
+        self.setpoints = self.path_interpolate(self.init_setpoints) # adding sethpoints to have less than max_distance_setpoints between each setpoint
         self.index_current_setpoint = 0
-
-        self.x_landing = 0
-        self.y_landing = 0
 
     def path_interpolate(self, init_setpoints):
         """
@@ -93,7 +90,8 @@ class MyController():
         """
         final_setpoints = []
         for current in init_setpoints:
-            print(current)
+            if plot:
+                print(current)
             if current != init_setpoints[0]: # exept first setpoint 
                 # check distance with previous setpoint
                 delta_x = current[0] - previous[0]
@@ -111,7 +109,7 @@ class MyController():
             final_setpoints.append(current) # also add current setpoint, even for the first one
             previous = current # store the current setpoint for comparison with the next
 
-        if print : # print the path + interpolated setpoints
+        if plot : # print the path + interpolated setpoints
             print(final_setpoints)
             x = []
             y = []
@@ -211,11 +209,12 @@ class MyController():
         Emergency stop : hold space to land slowly, release to stop the motors
         """
 
-        global plot
+        global plot, x_landing, y_landing
 
         # if detects Q key, land and stop the program, must be the first condition in the function
         if self.state != State.EMERGENCY and keyboard.is_pressed('space'):
-            print("EMERGENCY")
+            if plot:
+                print("EMERGENCY")
             self.state = State.EMERGENCY
             self.landing_found = True
             self.height_desired -= 0.005
@@ -224,7 +223,8 @@ class MyController():
         
         # if the drone is in emergency state, stop the motors when the space key is released
         if self.state == State.EMERGENCY and not keyboard.is_pressed('space'):
-            print("EMERGENCY END")
+            if plot:
+                print("EMERGENCY END")
             control_command = [0.0, 0.0, 0.0, -1] # stop the motors
             return control_command
         
@@ -273,16 +273,10 @@ class MyController():
                 control_command = [0.0, 0.0, 0.0, self.height_desired]
                 return control_command
             else:
-                #self.state = State.ROTATE
-                self.state = State.TEST # for the test
+                self.state = State.ROTATE
+                #self.state = State.TEST # for the test
                 self.counter_runnning = True
                 self.count = 0
-                if self.start: # save the landing pad position
-                    self.start = False
-                    self.x_landing = sensor_data['stateEstimate.x'] + self.x_ini
-                    self.y_landing = sensor_data['stateEstimate.y'] + self.y_ini
-                    self.init_setpoints = [[self.x_landing, self.y_landing]] + self.init_setpoints # add current pos at the beginitng of the path
-                    self.setpoints = self.path_interpolate(self.init_setpoints) # interposlate more points in the path
         
         # Land
         if self.state == State.LANDING or self.state == State.EMERGENCY:
@@ -323,7 +317,7 @@ class MyController():
         
         # Get the goal position and drone position to compute ditance to setpoint
         if self.landing_found:
-            x_goal, y_goal = self.x_landing, self.y_landing
+            x_goal, y_goal = x_landing, y_landing
         else:
             x_goal, y_goal = self.setpoints[self.index_current_setpoint]
 
