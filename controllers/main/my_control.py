@@ -112,7 +112,7 @@ preplanned_path = []
 obstacle_map = np.zeros((map_nx, map_ny)) # 0 = unknown, 1 = free, -1 = occupied
 
 def find_x_positive_free_cell(current_pos): #TODO: implement this function
-    return current_pos + Coord(0.25, 0.0)
+    return current_pos + Coord(0.5, 0.0)
 
 def find_most_interesting_cell(current_pos): #TODO: implement this function
     return Coord(0.0, 0.0)
@@ -180,10 +180,11 @@ def occupancy_map(current_pos, sensor_data):
 
 class MyController():
     def __init__(self):
+        self.start_pos    = Coord(-1.0, -1.0)  
         self.current_pos  = Coord(0.0, 0.0)
         self.global_goals = []
         self.state = State.TAKE_OFF_1
-
+        
         generate_preplanned_path(0.25, Coord(3.5, 0.0), Coord(5.0, 3.0), True)
 
         self.flying_height = 0.5 # m
@@ -266,7 +267,7 @@ class MyController():
 
         global gait, x_landing, y_landing
         
-        direction = 0.0 # Coord.angle(self.current_pos, self.global_goals[0])
+        direction = Coord.angle(self.current_pos, self.global_goals[0])
         dir2face = 0.0
 
         if gait == Gait.STATIC:
@@ -307,7 +308,14 @@ class MyController():
         vy = 0.0
         vyaw = 0.0
         
-        self.current_pos = Coord(sensor_data['stateEstimate.x'], sensor_data['stateEstimate.y'])
+        if self.start_pos.x == -1.0:
+            self.start_pos = Coord(sensor_data['stateEstimate.x'], sensor_data['stateEstimate.y'])
+            control_command = [vx, vy, vyaw, self.height_desired]
+            return control_command
+        else:
+            self.current_pos = Coord(sensor_data['stateEstimate.x'], sensor_data['stateEstimate.y']) - self.start_pos
+
+
         occupancy_map(self.current_pos, sensor_data)
 
         
