@@ -40,6 +40,12 @@ class Coord:
     def __str__(self):
         return "Point(%s,%s)"%(self.x, self.y) 
 
+    def __add__(self, other):
+        return Coord(self.x + other.x, self.y + other.y)
+    
+    def __sub__(self, other):
+        return Coord(self.x - other.x, self.y - other.y)
+    
     def dist(self, other):
         dx = self.x - other.x
         dy = self.y - other.y
@@ -55,8 +61,10 @@ class Coord:
         print(p1)
         p2 = Coord(1.0,-1.0)
         print(p2)
+        print(p1 + p2)
+        print(p1 - p2)
         print(np.rad2deg(Coord.angle(p1, p2)))
-        print(p1.dist(p2))
+        print(Coord.dist(p1, p2))
 
 class State(Enum): # state machine for the high-level control
     TAKE_OFF_1 = 0
@@ -84,6 +92,14 @@ gait = Gait.STRAIGHT # Gait of the robot
 mode = Mode.DUMB
 lateral_threshold = 0.1 # in meters
 
+map_min = Coord(0.0, 0.0)
+map_max = Coord(5.0, 3.0)
+map_res = 0.25
+map_nx = int((map_max.x - map_min.x) / map_res)
+map_ny = int((map_max.y - map_min.y) / map_res)
+range_max = 2
+conf = 1
+
 plot = False # plot the yaw controller & other data
 plot_path = False # plot the path of the robot
 plot_PID = False # plot the PID controller
@@ -92,7 +108,7 @@ plot_PID = False # plot the PID controller
 Global variables
 """
 preplanned_path = []
-
+obstacle_map = np.zeros((map_nx, map_ny)) # 0 = unknown, 1 = free, -1 = occupied
 
 def find_x_positive_free_cell(current_pos): #TODO: implement this function
     return Coord(0.0, 0.0)
@@ -108,7 +124,7 @@ def a_star(current_pos, goal): #TODO: implement this function
     """
     return []
 
-def generate_preplanned_path(step_size, coord_min, coord_max, print=False):
+def generate_preplanned_path(step_size, coord_min, coord_max, top, debug=False):
     """
     step_size [in] in m
     coord_min [in] bottom left corner
@@ -118,18 +134,53 @@ def generate_preplanned_path(step_size, coord_min, coord_max, print=False):
     preplanned_path = []
     n_x = int((coord_max.x - coord_min.x) / step_size)
     n_y = int((coord_max.y - coord_min.y) / step_size)
-    top = False
     
-    for xi in range(n_x):
-        for yi in range(0, n_y, 1):
-            preplanned_path = preplanned_path.append(coord_min + Coord(xi, yi))
-        for yi in range(n_y, 0, -1):
-            preplanned_path = preplanned_path.append(coord_min + Coord(xi, yi))
+    for xi in range(n_x + 1):
+        if top:
+            for yi in range(0, n_y + 1, 1):
+                preplanned_path.extend([coord_min + Coord(xi * step_size, yi * step_size)])
+        else:
+            for yi in range(n_y, -1, -1):
+                preplanned_path.extend([coord_min + Coord(xi * step_size, yi * step_size)])
         top = not top
-        
-    if print:
+    
+    if debug:
         for point in preplanned_path:
             print(point)
+
+def occupancy_map(current_pos, sensor_data):
+    global obstacle_map
+    yaw = sensor_data['stabilizer.yaw']
+    
+    for j in range(4): # 4 sensors
+        yaw_sensor = yaw + j*np.pi/2 #yaw positive is counter clockwise
+        if j == 0:
+            measurement = sensor_data['range_front']
+        elif j == 1:
+            measurement = sensor_data['range_left']
+        elif j == 2:
+            measurement = sensor_data['range_back']
+        elif j == 3:
+            measurement = sensor_data['range_right']
+        
+        for i in range(int(range_max / map_res)): # range is 2 meters
+            dist = i * map_res
+            idx_x = int(np.round((current_pos.x - map_min.x + dist*np.cos(yaw_sensor)) / map_res, 0))
+            idx_y = int(np.round((current_pos.y - map_min.y + dist*np.sin(yaw_sensor)) / map_res, 0))
+
+            # make sure the point is within the map
+            if idx_x < 0 or idx_x >= map.shape[0] or idx_y < 0 or idx_y >= map.shape[1] or dist > range_max:
+                break
+
+            # update the map
+            if dist < measurement:
+                map[idx_x, idx_y] += conf
+            else:
+                map[idx_x, idx_y] -= conf
+                break
+    
+    map = np.clip(map, -1, 1) # certainty can never be more than 100%
+    return map
 
 class MyController():
     def __init__(self):
@@ -261,9 +312,8 @@ class MyController():
         vyaw = 0.0
         
         self.current_pos = Coord(sensor_data['stateEstimate.x'], sensor_data['stateEstimate.y'])
-        
-        if plot:
-            print(self.state)
+        occupancy_map(self.current_pos, sensor_data)
+
         
         # if detects Q key, land and stop the program, must be the first condition in the function
         if keyboard.is_pressed('space'):
