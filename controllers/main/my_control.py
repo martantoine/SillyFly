@@ -42,6 +42,7 @@ Global parameters to change
 """
 x_landing, y_landing = 0.0, 0.0 # Initial landing pad position
 gait = Gait.STRAIGHT # Gait of the robot
+preplanned_path = []
 
 plot = False # plot the yaw controller & other data
 plot_path = False # plot the path of the robot
@@ -85,13 +86,59 @@ class State(Enum): # state machine for the high-level control
     LAND_2 = 5
     EMERGENCY = 6
 
+
+
+class Mode(Enum): # state machine for the high-level control
+    DUMB = 0
+    SILLY = 1
+    
+def find_x_positive_free_cell(current_pos): #TODO: implement this function
+    return Coord(0.0, 0.0)
+
+
+def find_most_interesting_cell(current_pos): #TODO: implement this function
+    return Coord(0.0, 0.0)
+
+def a_star(current_pos, goal): #TODO: implement this function
+    """
+    current_pos [in]: Coord type object, the start point of the path finding algorithm
+    goal [in]: Coord type object, the end point of the path finding algorithm
+    Coord[]: an array of coord, the result of the path finding algorithm
+    """
+    return []
+
+def generate_preplanned_path(step_size, coord_min, coord_max, print=False):
+    """
+    step_size [in] in m
+    coord_min [in] bottom left corner
+    coord_max [in] top right corner
+    """
+    global preplanned_path
+    preplanned_path = []
+    n_x = int((coord_max.x - coord_min.x) / step_size)
+    n_y = int((coord_max.y - coord_min.y) / step_size)
+    top = False
+    
+    for xi in range(n_x):
+        for yi in range(0, n_y, 1):
+            preplanned_path = preplanned_path.append(coord_min + Coord(xi, yi))
+        for yi in range(n_y, 0, -1):
+            preplanned_path = preplanned_path.append(coord_min + Coord(xi, yi))
+        top = not top
+        
+    if print:
+        for point in preplanned_path:
+            print(point)
+
+a_star
 # Don't change the class name of 'MyController'
 class MyController():
     def __init__(self):
         global x_landing, y_landing
-
-        self.inverted =  False
-        self.landing_found = False
+        self.current_pos  = Coord(0.0, 0.0)
+        self.local_goal   = Coord(0.0, 0.0)
+        self.global_goals = []
+        self.mode = Mode.SILLY
 
         self.flying_height = 0.5 # m
         self.height_desired = 0
@@ -101,8 +148,6 @@ class MyController():
         self.yaw_d = 0.5
         self.yaw_err_prev = 0.0
         self.yaw_i_prev = 0.0
-        #self.yaw_d = 2.0
-        #self.yaw_rate_prev = 0.0
         self.max_yaw_rate = 2*360.0
         self.speed = 0.3
 
@@ -216,13 +261,11 @@ class MyController():
 
         return yaw_rate
 
-    def move(self, x_goal, y_goal, sensor_data):
+    def move(self, sensor_data):
         """
         move the robot in the given direction
 
         input :
-        x_goal : x coordinate of the goal
-        y_goal : y coordinate of the goal
         sensor_data : sensor data from the drone
 
         output :
@@ -231,10 +274,8 @@ class MyController():
 
         global gait, x_landing, y_landing
         
-        x_drone = sensor_data['stateEstimate.x'] + x_landing
-        y_drone = sensor_data['stateEstimate.y'] + y_landing
-        direction = np.rad2deg(np.arctan2(y_goal - y_drone, x_goal - x_drone))
-
+        direction = Coord.angle(self.current_pos, self.local_goal)
+        
         if gait == Gait.STATIC:
             dir2face = 0.0
         elif gait == Gait.STRAIGHT:
@@ -269,12 +310,14 @@ class MyController():
         Emergency stop : hold space to land slowly, release to stop the motors
         """
         global plot, x_landing, y_landing
+        global obstacle_map
         vx = 0.0
         vy = 0.0
         vyaw = 0.0
         
+        self.current_pos = Coord(sensor_data['stateEstimate.x'] + x_landing, 
+                                 sensor_data['stateEstimate.y'] + y_landing)
         
-
         if plot:
             print(self.state)
         
@@ -298,39 +341,35 @@ class MyController():
                     self.state = State.GO_TO_LANDING_REGION
 
             case State.GO_TO_LANDING_REGION:
-                if Coord.dist(current_pos, local_goal) > lateral_threshold:
-                       if self.state == State.NEXT_SETPOINT:
-                        control_command = self.move(np.rad2deg(np.arctan2(y_goal - y_drone, x_goal - x_drone)), sensor_data)
-                    command.yaw = angle(current-pos, local-goal) + sin(step) * 20 / 90
-                    if(angle(current-pos, local-goal) < angle-threshold):
-                        command.vx = lateral-speed
+                if Coord.dist(self.current_pos, self.local_goal) > 0.1: #TODO: Replace value with constant
+                    control_command = self.move(sensor_data)
                 else:
-                    if(current-pos-x > landing-x-min):
-                        state = SCANNING-LANDING-PAD
+                    if self.current_pos.x > 3.5:
+                        self.state = State.SCANNING_LANDING_PAD
                     else:
-                        if(!global-goals.empty()):
-                            local-goal = global-goals[0]
-                            global-goals.pop_first()
+                        if not self.global_goals.empty(): #TODO: check if empty() is the right function
+                            self.local_goal = self.global_goals[0]
+                            self.global_goals.pop(0) #delete the first element
                         else:
-                            global-goal = find-x-positive-free-cell()
-                            globals-path = a-star(current-pos, global-goal)
+                            self.global_goal = find_x_positive_free_cell(self.current_pos)
+                            self.globals_path = a_star(self.current_pos, self.global_goal)
             
             case State.SCANNING_LANDING_PAD:
-                if dist(local-goal, current-pos) < lateral-threshold
-                    goal-reached = True
-                    if(!global-goals.empty())
-                        local-goal = global-goals[0]
-                        global-goals.pop_first()
-                    else
-                        if mode == SILLY
-                            global-goal = find-most-interesting-cell()
-                        else if mode == DUMB
-                            while obstacle[preplanned-path[i].coords] != -1
-                                i++ : skip if cell blocked by obstacle
-                            global-goal = preplanned-path[i]
-                            i++ increment the counter for future step
-                        globals-path = a-star(current-pos, global-goal)
-                else
+                if Coord.dist(self.current_pos, self.local_goal) < 0.1: #Replace value with constant
+                    goal_reached = True
+                    if not self.global_goals.empty(): #TODO: check if empty() is the right function
+                        self.local_goal = self.global_goals[0]
+                        self.global_goals.pop(0) #delete the first element
+                    else:
+                        if self.mode == Mode.SILLY:
+                            self.global_goal = find_most_interesting_cell()
+                        elif self.mode == Mode.DUMB:
+                            while obstacle_map[preplanned_path[i].coords] != -1:
+                                i += 1 # skip if cell blocked by obstacle
+                            self.global_goal = preplanned_path[i]
+                            i += 1 #increment the counter for future step
+                        self.globals_path = a_star(self.current_pos, self-global_goal)
+                else:
                     if(dist(current-pos, path-goal) > lateral-threshold
                         command.yaw = angle(current-pos, path-goal) + sin(step) * 20 / 90
                         if(angle(current-pos, path-goal) < angle-threshold)
