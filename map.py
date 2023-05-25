@@ -3,11 +3,11 @@ import matplotlib.pyplot as plt
 
 # Occupancy map based on distance sensor, A CHANGER LES VALEURS SELON LA TAILLE DE NOTRE ENVIRONNEMENT
 min_x, max_x = 0, 5.0 # meter
-min_y, max_y = 0, 5.0 # meter
+min_y, max_y = 0, 3.0 # meter
 range_max = 2.0 # meter, maximum range of distance sensor
 res_pos = 0.2 # meter
-conf = 0.2 # certainty given by each measurement
-t = 0 # only for plotting
+conf = 1 # certainty given by each measurement
+#t = 0 # only for plotting
 
 map = np.zeros((int((max_x-min_x)/res_pos), int((max_y-min_y)/res_pos))) # 0 = unknown, 1 = free, -1 = occupied
 
@@ -52,9 +52,9 @@ def occupancy_map(sensor_data):
     map = np.clip(map, -1, 1) # certainty can never be more than 100%
 
     # only plot every Nth time step (comment out if not needed)
-    if t % 50 == 0:
-        plt.imshow(np.flip(map,1), vmin=-1, vmax=1, cmap='gray', origin='lower') # flip the map to match the coordinate system
-        plt.savefig("map.png")
-    t +=1
+    #if t % 50 == 0:
+        #plt.imshow(np.flip(map,1), vmin=-1, vmax=1, cmap='gray', origin='lower') # flip the map to match the coordinate system
+        #plt.savefig("map.png")
+    #t +=1
 
     return map
