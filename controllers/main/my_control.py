@@ -26,6 +26,7 @@ height : [m]
 counter : 40 =~ 1s
 """
 
+import math
 import numpy as np
 from enum import Enum
 import keyboard
@@ -35,7 +36,6 @@ class Gait(Enum): # gait of the robot
     STATIC = 0
     STRAIGHT = 1
     OSCILLATION = 2
-
 
 """
 Global parameters to change
@@ -47,16 +47,43 @@ plot = False # plot the yaw controller & other data
 plot_path = False # plot the path of the robot
 plot_PID = False # plot the PID controller
 
+class Coord:
+    COUNT = 0
+
+    def __init__(self, x=0.0, y=0.0):
+        self.x = x
+        self.y = y
+
+    def __str__(self):
+        return "Point(%s,%s)"%(self.x, self.y) 
+
+    def dist(self, other):
+        dx = self.x - other.x
+        dy = self.y - other.y
+        return math.sqrt(dx**2 + dy**2)
+
+    def angle(self, other):
+        angle = np.arctan2((other.y - self.y), (other.x - self.x))
+        return angle
+
+    def test():
+        '''Returns a point and distance'''
+        p1 = Coord(1.0, 1.0)
+        print(p1)
+        p2 = Coord(1.0,-1.0)
+        print(p2)
+        print(np.rad2deg(Coord.angle(p1, p2)))
+        print(p1.dist(p2))
 
 class State(Enum): # state machine for the high-level control
-    ON_GROUND = 0
-    LANDING = 1
-    NEXT_SETPOINT = 2
-    OBS_AVOID = 3
-    ROTATE = 4
-    END = 5
+    TAKE_OFF_1 = 0
+    GO_TO_LANDING_REGION = 1
+    SCANNING_LANDING_PAD = 2
+    LAND_1 = 3
+    TAKE_OFF_2 = 4
+    GO_TO_TAKE_OFF_PAD = 4
+    LAND_2 = 5
     EMERGENCY = 6
-    TEST = 7
 
 # Don't change the class name of 'MyController'
 class MyController():
@@ -238,104 +265,96 @@ class MyController():
 
         Emergency stop : hold space to land slowly, release to stop the motors
         """
-
         global plot, x_landing, y_landing
+        vx = 0.0
+        vy = 0.0
+        vyaw = 0.0
+        
+        
 
         if plot:
             print(self.state)
-
+        
         # if detects Q key, land and stop the program, must be the first condition in the function
-        if self.state != State.EMERGENCY and keyboard.is_pressed('space'):
-            if plot:
-                print("EMERGENCY")
-            self.state = State.EMERGENCY
-            self.landing_found = True
-            self.height_desired -= 0.005
-            control_command = [0.0, 0.0, 0.0, self.height_desired]
-            return control_command
-        
-        # if the drone is in emergency state, stop the motors when the space key is released
-        if self.state == State.EMERGENCY and not keyboard.is_pressed('space'):
-            if plot:
-                print("EMERGENCY END")
-            control_command = [0.0, 0.0, 0.0, -1] # stop the motors
-            return control_command
-        
-        # if the the drone is in END state, stop the motors
-        if self.state == State.END:
-            if plot_PID:#plot PID controller
-                plt.plot(self.yaw_error_table, label="yaw error")
-                plt.plot(self.yaw_prop_table, label="yaw prop")
-                plt.plot(self.yaw_int_table, label="yaw int")
-                plt.plot(self.yaw_der_table, label="yaw der")
-                plt.plot(self.yaw_rate_table, label="yaw rate")
-                plt.legend()
-                plt.show()
-            control_command = [0.0, 0.0, 0.0, -1] # stop the motors
-            return control_command
-        
-        # If all setpoints were explored, explore them in the inverse order, to reach more of the space
-        if self.index_current_setpoint == len(self.setpoints)-1:
-            self.inverted = True
+        if keyboard.is_pressed('space'):
+            self.state = State.EMERGENCY        
 
-        if self.counter_runnning:
-            self.count += 1
+        match self.state:
+            case State.EMERGENCY:
+                if keyboard.is_pressed('space'):
+                    self.height_desired -= 0.005
+                else:
+                    self.height_desired = -1 # stop the motors
+                if plot:
+                    print("EMERGENCY END")
 
-        # test state : move to a given position
-        if self.state == State.TEST:
-            if self.count < 2*40:
-                print("FORWARD")
-                dir = 0.0
-            elif self.count < 4*40:
-                print("LEFT")
-                dir = 90.0
-            elif self.count < 6*40:
-                print("BACK")
-                dir = 180.0
-            elif self.count < 8*40:
-                print("RIGHT")
-                dir = -90.0
-            else:
-                dir = 0.0
-                self.state = State.LANDING
-                self.landing_found = True
-                self.counter_runnning = False
-                self.count = 0
-                self.height_desired -= 0.005
-                control_command = [0.0, 0.0, 0.0, self.height_desired]
-            #print("counter : ", self.count, " | dir : ", dir, " | dir robot : ", sensor_data['stabilizer.yaw'])
-            control_command = self.move(dir, True, sensor_data)
-            return control_command
+            case State.TAKE_OFF_1:
+                if sensor_data['range.zrange'] < 490:
+                    self.height_desired = self.flying_height
+                else:
+                    self.state = State.GO_TO_LANDING_REGION
 
-        # Take off
-        if self.state == State.ON_GROUND:
-            if sensor_data['range.zrange'] < 490:
-                self.height_desired = self.flying_height
-                control_command = [0.0, 0.0, 0.0, self.height_desired]
-                return control_command
-            else:
-                self.state = State.ROTATE
-                #self.state = State.TEST # for the test
-                self.counter_runnning = True
-                self.count = 0
+            case State.GO_TO_LANDING_REGION:
+                if Coord.dist(current_pos, local_goal) > lateral_threshold:
+                       if self.state == State.NEXT_SETPOINT:
+                        control_command = self.move(np.rad2deg(np.arctan2(y_goal - y_drone, x_goal - x_drone)), sensor_data)
+                    command.yaw = angle(current-pos, local-goal) + sin(step) * 20 / 90
+                    if(angle(current-pos, local-goal) < angle-threshold):
+                        command.vx = lateral-speed
+                else:
+                    if(current-pos-x > landing-x-min):
+                        state = SCANNING-LANDING-PAD
+                    else:
+                        if(!global-goals.empty()):
+                            local-goal = global-goals[0]
+                            global-goals.pop_first()
+                        else:
+                            global-goal = find-x-positive-free-cell()
+                            globals-path = a-star(current-pos, global-goal)
+            
+            case State.SCANNING_LANDING_PAD:
+                if dist(local-goal, current-pos) < lateral-threshold
+                    goal-reached = True
+                    if(!global-goals.empty())
+                        local-goal = global-goals[0]
+                        global-goals.pop_first()
+                    else
+                        if mode == SILLY
+                            global-goal = find-most-interesting-cell()
+                        else if mode == DUMB
+                            while obstacle[preplanned-path[i].coords] != -1
+                                i++ : skip if cell blocked by obstacle
+                            global-goal = preplanned-path[i]
+                            i++ increment the counter for future step
+                        globals-path = a-star(current-pos, global-goal)
+                else
+                    if(dist(current-pos, path-goal) > lateral-threshold
+                        command.yaw = angle(current-pos, path-goal) + sin(step) * 20 / 90
+                        if(angle(current-pos, path-goal) < angle-threshold)
+                            command.vx = lateral-speed
+                    else
+                        if(current-pos-x > landing-x-min)
+                            state = SCANNING-LANDING-PAD
+                    else
+                        path-goal = find-x-positive-free-cell()
+            
+            case State.LAND_1:
+                if(current-pos.z > some-threshold)
+                    command.z = current-pos.z - z-step
+                else
+                    state = TAKE-OFF-2
+
+            case State.LAND_2:
+                if sensor_data['range.zrange'] < 20: # True if has landed
+                    self.height_desired = -1 # stop the motors
+                    print("ground reached")
+                else:    
+                    self.height_desired -= 0.005
+            
+            if self.counter_runnning:
+                self.count += 1
         
-        # Land
-        if self.state == State.LANDING or self.state == State.EMERGENCY:
-            #has landed
-            if sensor_data['range.zrange'] < 20:
-                print("ground reached")
-                if self.landing_found: # end of the program
-                    self.state = State.END
-
-                    control_command = [0.0, 0.0, 0.0, -1] # -1 means stop motors
-                    return control_command
-                else: # landing pad found
-                    self.state = State.ON_GROUND
-                    self.landing_found = True
-            self.height_desired -= 0.005
-            control_command = [0.0, 0.0, 0.0, self.height_desired]
-            return control_command
-        # Landing command
+        control_command = [vx, vy, vyaw, self.height_desired]
 
         #wait for the robot to be stable (count > 100), then wait the detection of the landing pad to send the landing order
         if self.state == State.NEXT_SETPOINT and not self.landing_found and self.count > 120 and sensor_data['range.zrange'] < 470:
@@ -376,58 +395,12 @@ class MyController():
                 self.count_pid = 0.0
             else:
                 self.state = State.ROTATE
-            
-        #if state == ROTATE, rotate until the drone is facing the next setpoint
-        if self.state == State.ROTATE:
-            #compute yaw_rate to head in direction of the next setpoint
-            yaw_rate = self.yaw_controller(np.rad2deg(np.arctan2(y_goal - y_drone, x_goal - x_drone)), sensor_data)            
-            if abs(yaw_rate) > 4:
-                control_command = [0.0, 0.0, yaw_rate, self.height_desired]
-                return control_command
-            else:
-                self.state = State.NEXT_SETPOINT
-                self.count_pid = 0.0
+    
 
         #get proximity sensor data
         front_prox = sensor_data['range.front']
         left_prox = sensor_data['range.left']
         right_prox = sensor_data['range.right']
-        
-        # if state == NEXT_SETPOINT and a sensor detects an obstacle, go to OBS_AVOID state
-        if self.state == State.NEXT_SETPOINT and (front_prox < 0.25 or left_prox < 0.2 or right_prox < 0.2):
-            self.state = State.OBS_AVOID
-
-        if self.state == State.OBS_AVOID:
-            # check if the obstacle is avoided
-            if front_prox > 0.25 and left_prox > 0.2 and right_prox > 0.2:
-                self.state = State.ROTATE
-                self.counter_runnning = True
-                self.count = 0
-                control_command = [0.0, 0.0, 0.0, self.height_desired]
-                return control_command
-            elif distance_drone_to_goal < 0.4: # if setpoint in obstacle, go to next setpoint
-                if self.inverted:
-                    self.index_current_setpoint -= 1
-                else:
-                    self.index_current_setpoint += 1
-                self.state = State.ROTATE
-                self.avoid_dir = 0
-                control_command = [0.0, 0.0, 0.0, self.height_desired]
-                return control_command
-            elif front_prox < 0.2: # go back
-                control_command = [-0.3, 0.0, 0.0, self.height_desired]
-                return control_command
-            else:
-                if left_prox < 0.2 or right_prox < 0.2: # force to avoid new close obstacle
-                    self.avoid_dir = 0
-                # go perpendicular of the next setpoint, until the obstacle is avoided
-                # always turn in the same direction for the same obstacle
-                if self.avoid_dir == 0 and left_prox > right_prox:
-                    self.avoid_dir = 1
-                elif self.avoid_dir == 0:
-                    self.avoid_dir = -1
-                control_command = [0, self.avoid_dir * 0.3 , 0.0, self.height_desired]
-                return control_command
             
         # direction command to next setpoint
         if self.state == State.NEXT_SETPOINT:
