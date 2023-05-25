@@ -31,6 +31,7 @@ import numpy as np
 from enum import Enum
 import keyboard
 from matplotlib import pyplot as plt
+from gpt4 import astar
 
 class Coord:
     def __init__(self, x=0.0, y=0.0):
@@ -111,18 +112,10 @@ preplanned_path = []
 obstacle_map = np.zeros((map_nx, map_ny)) # 0 = unknown, 1 = free, -1 = occupied
 
 def find_x_positive_free_cell(current_pos): #TODO: implement this function
-    return Coord(0.0, 0.0)
+    return current_pos + Coord(0.1, 0.0)
 
 def find_most_interesting_cell(current_pos): #TODO: implement this function
     return Coord(0.0, 0.0)
-
-def a_star(current_pos, goal): #TODO: implement this function
-    """
-    current_pos [in]: Coord type object, the start point of the path finding algorithm
-    goal [in]: Coord type object, the end point of the path finding algorithm
-    Coord[]: an array of coord, the result of the path finding algorithm
-    """
-    return []
 
 def generate_preplanned_path(step_size, coord_min, coord_max, top, debug=False):
     """
@@ -344,8 +337,10 @@ class MyController():
                     if self.current_pos.x > 3.5:
                         self.state = State.SCANNING_LANDING_PAD
                     else:
-                        self.globals_path = a_star(self.current_pos, find_x_positive_free_cell(self.current_pos))
-            
+                        tmp = find_x_positive_free_cell(self.current_pos)
+                        self.globals_path = astar(obstacle_map, [self.current_pos.x / map_res, self.current_pos.y / map_res],
+                                                  [tmp.x / map_res, tmp.y / map_res])
+
             case State.SCANNING_LANDING_PAD:
                 if self.global_goals: # check if the array is not empty
                     if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
@@ -360,7 +355,8 @@ class MyController():
                             i += 1 # skip if cell blocked by obstacle
                         tmp = preplanned_path[i]
                         i += 1 #increment the counter for future step
-                    self.globals_path = a_star(self.current_pos, tmp)
+                    self.globals_path = astar(obstacle_map, [self.current_pos.x / map_res, self.current_pos.y / map_res],
+                                             [tmp.x / map_res, tmp.y / map_res])
 
             case State.LAND_1:
                 if sensor_data['range.zrange'] < 20: # True if has landed
@@ -376,7 +372,8 @@ class MyController():
                     else:
                         self.global_goals.pop(0) #delete the first element
                 else:
-                    self.globals_path = a_star(self.current_pos, Coord(0.0, 0.0))
+                    self.globals_path = astar(obstacle_map, [self.current_pos.x / map_res, self.current_pos.y / map_res],
+                                              [0, 0])
 
             case State.LAND_2:
                 if sensor_data['range.zrange'] < 20: # True if has landed
