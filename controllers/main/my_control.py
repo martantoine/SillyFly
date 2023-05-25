@@ -63,7 +63,7 @@ lateral_threshold = 0.2 # in meters
 
 map_min = Coord(0.0, 0.0)
 map_max = Coord(5.0, 3.0)
-map_res = 0.2
+map_res = 0.1
 map_nx = int((map_max.x - map_min.x) / map_res)
 map_ny = int((map_max.y - map_min.y) / map_res)
 range_max = 2.0
@@ -306,8 +306,17 @@ class MyController():
 
 
         obstacle_map = occupancy_map(self.current_pos, sensor_data)
-        inflated_map = obstacle_map
-        
+        mean_mat = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        obstacle_map_masked = np.copy(obstacle_map)
+        for x in range(len(obstacle_map_masked)):
+            for y in range(len(obstacle_map_masked[0])):
+                if obstacle_map_masked[x][y] != -1:
+                    obstacle_map_masked[x][y] = 0
+                else:
+                    obstacle_map_masked[x][y] = 1
+        inflated_map = cv2.dilate(obstacle_map_masked, mean_mat)
+        inflated_map = np.clip(-2 * inflated_map + obstacle_map, -1, 1)
+                        
         # if detects Q key, land and stop the program, must be the first condition in the function
         if keyboard.is_pressed('space'):
             self.state = State.EMERGENCY        
@@ -341,16 +350,6 @@ class MyController():
                         self.state = State.EMERGENCY
                     else:
                         tmp = find_x_positive_free_cell(self.current_pos)
-                        
-                        #obstacle_map_masked = obstacle_map
-                        #for x in range(len(obstacle_map_masked)):
-                        #    for y in range(len(obstacle_map_masked[0])):
-                        #        if obstacle_map_masked[x][y] != -1:
-                        #            obstacle_map_masked[x][y] = 0
-                            
-                        #mean_mat = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-                        #inflated_map = cv2.dilate(obstacle_map_masked, mean_mat)
-                        #inflated_map = inflated_map + obstacle_map[np.where(obstacle_map == 1)]
                         
                         obs_tmp = inflated_map.astype(int).tolist()    
                         self.global_goals = array2Coord(astar(obs_tmp, (c2d(self.current_pos.x), c2d(self.current_pos.y)), (c2d(tmp.x), c2d(tmp.y))))
@@ -397,9 +396,9 @@ class MyController():
                     self.height_desired -= 0.005
         
         if t % 100 == 0:
-            #obstacle_map_drone = inflated_map
-            #obstacle_map_drone[c2d(self.current_pos.x)][c2d(self.current_pos.y)] = 2 
-            plt.imsave("map.png", np.flip(obstacle_map.astype(int), 1), vmin=-1, vmax=2, cmap='gray', origin='lower')
+            obstacle_map_drone = np.copy(obstacle_map)
+            obstacle_map_drone[np.clip(c2d(self.current_pos.x), 0, map_nx)][np.clip(c2d(self.current_pos.y), 0, map_ny)] = 2 
+            plt.imsave("map.png", np.flip(obstacle_map_drone.astype(int), 1), vmin=-1, vmax=2, cmap='gray', origin='lower')
             plt.imsave("inflated.png", np.flip(inflated_map.astype(int), 1), vmin=-1, vmax=2, cmap='gray', origin='lower')
             
             print(c2d(self.current_pos.x), c2d(self.current_pos.y), sensor_data['stabilizer.yaw'])
