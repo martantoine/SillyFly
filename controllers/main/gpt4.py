@@ -16,27 +16,28 @@ class Node:
         return self.priority < other.priority or (self.priority == other.priority and self.cost > other.cost)
 
 def calculate_heuristic(current, goal):
-    dx = abs(current.x - goal.x)
-    dy = abs(current.y - goal.y)
+    dx = abs(current[0] - goal[0])
+    dy = abs(current[1] - goal[1])
     return min(dx, dy) * 14 + abs(dx - dy) * 10  
 
 def get_neighbors(current, map):
     neighbors = []
-    directions = [Coord(1, 0), Coord(-1, 0), Coord(0, 1), Coord(0, -1), Coord(1, 1), Coord(1, -1), Coord(-1, 1), Coord(-1, -1)]
+    directions = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
     
-    for d in directions:
-        xy = current + d
-        if 0 <= xy.x < len(map) and 0 <= xy.y < len(map[0]) and map[xy.x][xy.y] != -1:
+    for dx, dy in directions:
+        x = current[0] + dx
+        y = current[1] + dy
+        if 0 <= x < len(map) and 0 <= y < len(map[0]) and map[x][y] != -1:
             
-            if map[xy.x][xy.y] == 1:
+            if map[x][y] == 1:
                 cost = 1
-            if map[xy.x][xy.y] == 0:
+            if map[x][y] == 0:
                 cost = 2
     
-            if d.x != 0 and d.y != 0:
+            if dx != 0 and dy != 0:
                 cost *= math.sqrt(2)
 
-            neighbors.append(Coord(xy.x, xy.y), cost)
+            neighbors.append((x, y, cost))
             
     return neighbors 
 
@@ -68,13 +69,13 @@ def astar(map, start, goal):
         neighbors = get_neighbors(current_position, map)
         
         for neighbor_position in neighbors:
-            if neighbor_position[0] in closed_set:
+            if neighbor_position[:2] in closed_set:
                 continue
 
-            neighbor_cost = current_node.cost + neighbor_position[1]
-            neighbor_heuristic = calculate_heuristic(neighbor_position[0], goal)
+            neighbor_cost = current_node.cost + neighbor_position[2]
+            neighbor_heuristic = calculate_heuristic(neighbor_position[:2], goal)
             neighbor_node = Node(
-                neighbor_position[0],
+                neighbor_position[:2],
                 parent=current_node,
                 cost=neighbor_cost,
                 heuristic=neighbor_heuristic
