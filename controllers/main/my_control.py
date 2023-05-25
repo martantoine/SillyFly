@@ -32,25 +32,7 @@ from enum import Enum
 import keyboard
 from matplotlib import pyplot as plt
 
-class Gait(Enum): # gait of the robot
-    STATIC = 0
-    STRAIGHT = 1
-    OSCILLATION = 2
-
-"""
-Global parameters to change
-"""
-x_landing, y_landing = 0.0, 0.0 # Initial landing pad position
-gait = Gait.STRAIGHT # Gait of the robot
-preplanned_path = []
-
-plot = False # plot the yaw controller & other data
-plot_path = False # plot the path of the robot
-plot_PID = False # plot the PID controller
-
 class Coord:
-    COUNT = 0
-
     def __init__(self, x=0.0, y=0.0):
         self.x = x
         self.y = y
@@ -86,15 +68,34 @@ class State(Enum): # state machine for the high-level control
     LAND_2 = 5
     EMERGENCY = 6
 
-
-
 class Mode(Enum): # state machine for the high-level control
     DUMB = 0
     SILLY = 1
-    
+
+class Gait(Enum): # gait of the robot
+    STATIC = 0
+    STRAIGHT = 1
+    OSCILLATION = 2
+
+"""
+Super parameters
+"""
+gait = Gait.STRAIGHT # Gait of the robot
+mode = Mode.DUMB
+lateral_threshold = 0.1 # in meters
+
+plot = False # plot the yaw controller & other data
+plot_path = False # plot the path of the robot
+plot_PID = False # plot the PID controller
+
+"""
+Global variables
+"""
+preplanned_path = []
+
+
 def find_x_positive_free_cell(current_pos): #TODO: implement this function
     return Coord(0.0, 0.0)
-
 
 def find_most_interesting_cell(current_pos): #TODO: implement this function
     return Coord(0.0, 0.0)
@@ -130,15 +131,12 @@ def generate_preplanned_path(step_size, coord_min, coord_max, print=False):
         for point in preplanned_path:
             print(point)
 
-a_star
-# Don't change the class name of 'MyController'
 class MyController():
     def __init__(self):
-        global x_landing, y_landing
         self.current_pos  = Coord(0.0, 0.0)
         self.local_goal   = Coord(0.0, 0.0)
         self.global_goals = []
-        self.mode = Mode.SILLY
+        self.state = State.TAKE_OFF_1
 
         self.flying_height = 0.5 # m
         self.height_desired = 0
@@ -156,62 +154,8 @@ class MyController():
         self.freq_oscillation = 1.0 # [Hz]
         self.count_pid = 0.0
 
-        # plot table
-        self.yaw_error_table = []
-        self.yaw_prop_table = []
-        self.yaw_int_table = []
-        self.yaw_der_table = []
-        self.yaw_rate_table = []
-
-        self.counter_runnning = False
         self.count = 0
-
-        self.state = State.ON_GROUND
-
-        # initial path planning (no obstacle known)
-        self.max_distance_setpoints = 0.25
-        #self.init_setpoints = [[x_landing, y_landing], [0.5, 0.1], [0.5, 0.5], [0.8, 0.5], [0.8, 0.0]] # test path
-        self.init_setpoints = [[x_landing, y_landing], [3.7, 0.1], [3.7, 2.9], [4.0, 2.9], [4.0, 0.1], [4.3, 0.1], [4.3, 2.9], [4.6, 2.9], [4.6, 0.1], [4.9, 0.1], [4.9,2.9]]
-        self.setpoints = self.path_interpolate(self.init_setpoints) # adding sethpoints to have less than max_distance_setpoints between each setpoint
-        self.index_current_setpoint = 0
-
-    def path_interpolate(self, init_setpoints):
-        """
-        Given the initial setpoints, add new setpoints in between
-        The space between two setpoints must be <= max_distance_setpoints
-        """
-        final_setpoints = []
-        for current in init_setpoints:
-            if current != init_setpoints[0]: # exept first setpoint 
-                # check distance with previous setpoint
-                delta_x = current[0] - previous[0]
-                delta_y = current[1] - previous[1]
-                dist = np.linalg.norm([delta_x, delta_y])
-                if dist > self.max_distance_setpoints:
-                    n = np.floor(dist / self.max_distance_setpoints).astype(int) # compute number of setpoints to add
-                    interval = dist / (n+1) # optimal interval to put between each new setpoint
-                    dir = np.arctan2(delta_y, delta_x) # direction between the setpoints (radians)
-                    interval_x = interval * np.cos(dir)
-                    interval_y = interval * np.sin(dir)
-                    for j in range(n): # add new setpoints
-                        final_setpoints.append([previous[0] + (j+1)*interval_x, previous[1] + (j+1)*interval_y])
-
-            final_setpoints.append(current) # also add current setpoint, even for the first one
-            previous = current # store the current setpoint for comparison with the next
-
-        # remove the first setpoint (useless)
-        final_setpoints.pop(0)
         
-        if plot_path : # print the path + interpolated setpoints
-            x = []
-            y = []
-            for i in final_setpoints:
-                x.append(i[0])
-                y.append(i[1])
-            plt.plot(x,y, marker='x')
-            plt.show()
-
-        return final_setpoints
 
     def yaw_controller(self, yaw_command ,sensor_data):
         """
@@ -309,14 +253,14 @@ class MyController():
 
         Emergency stop : hold space to land slowly, release to stop the motors
         """
-        global plot, x_landing, y_landing
+        global mode
+        global lateral_threshold
         global obstacle_map
         vx = 0.0
         vy = 0.0
         vyaw = 0.0
         
-        self.current_pos = Coord(sensor_data['stateEstimate.x'] + x_landing, 
-                                 sensor_data['stateEstimate.y'] + y_landing)
+        self.current_pos = Coord(sensor_data['stateEstimate.x'], sensor_data['stateEstimate.y'])
         
         if plot:
             print(self.state)
@@ -341,50 +285,48 @@ class MyController():
                     self.state = State.GO_TO_LANDING_REGION
 
             case State.GO_TO_LANDING_REGION:
-                if Coord.dist(self.current_pos, self.local_goal) > 0.1: #TODO: Replace value with constant
-                    control_command = self.move(sensor_data)
+                if self.global_goals: # check if the array is not empty
+                    if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
+                        control_command = self.move(sensor_data)
+                    else:
+                        self.global_goals.pop(0) #delete the first element
                 else:
                     if self.current_pos.x > 3.5:
                         self.state = State.SCANNING_LANDING_PAD
                     else:
-                        if not self.global_goals.empty(): #TODO: check if empty() is the right function
-                            self.local_goal = self.global_goals[0]
-                            self.global_goals.pop(0) #delete the first element
-                        else:
-                            self.global_goal = find_x_positive_free_cell(self.current_pos)
-                            self.globals_path = a_star(self.current_pos, self.global_goal)
+                        self.globals_path = a_star(self.current_pos, find_x_positive_free_cell(self.current_pos))
             
             case State.SCANNING_LANDING_PAD:
-                if Coord.dist(self.current_pos, self.local_goal) < 0.1: #Replace value with constant
-                    goal_reached = True
-                    if not self.global_goals.empty(): #TODO: check if empty() is the right function
-                        self.local_goal = self.global_goals[0]
-                        self.global_goals.pop(0) #delete the first element
+                if self.global_goals: # check if the array is not empty
+                    if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
+                        control_command = self.move(sensor_data)
                     else:
-                        if self.mode == Mode.SILLY:
-                            self.global_goal = find_most_interesting_cell()
-                        elif self.mode == Mode.DUMB:
-                            while obstacle_map[preplanned_path[i].coords] != -1:
-                                i += 1 # skip if cell blocked by obstacle
-                            self.global_goal = preplanned_path[i]
-                            i += 1 #increment the counter for future step
-                        self.globals_path = a_star(self.current_pos, self-global_goal)
+                        self.global_goals.pop(0) #delete the first element
                 else:
-                    if(dist(current-pos, path-goal) > lateral-threshold
-                        command.yaw = angle(current-pos, path-goal) + sin(step) * 20 / 90
-                        if(angle(current-pos, path-goal) < angle-threshold)
-                            command.vx = lateral-speed
-                    else
-                        if(current-pos-x > landing-x-min)
-                            state = SCANNING-LANDING-PAD
-                    else
-                        path-goal = find-x-positive-free-cell()
-            
+                    if mode == Mode.SILLY:
+                        tmp = find_most_interesting_cell()
+                    elif mode == Mode.DUMB:
+                        while obstacle_map[preplanned_path[i].coords] != -1:
+                            i += 1 # skip if cell blocked by obstacle
+                        tmp = preplanned_path[i]
+                        i += 1 #increment the counter for future step
+                    self.globals_path = a_star(self.current_pos, tmp)
+
             case State.LAND_1:
-                if(current-pos.z > some-threshold)
-                    command.z = current-pos.z - z-step
-                else
-                    state = TAKE-OFF-2
+                if sensor_data['range.zrange'] < 20: # True if has landed
+                    self.state = State.TAKE_OFF_2
+                    print("ground reached")
+                else:    
+                    self.height_desired -= 0.005
+
+            case State.GO_TO_TAKE_OFF_PAD:
+                if self.global_goals: # check if the array is not empty
+                    if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
+                        control_command = self.move(sensor_data)
+                    else:
+                        self.global_goals.pop(0) #delete the first element
+                else:
+                    self.globals_path = a_star(self.current_pos, Coord(0.0, 0.0))
 
             case State.LAND_2:
                 if sensor_data['range.zrange'] < 20: # True if has landed
@@ -392,65 +334,5 @@ class MyController():
                     print("ground reached")
                 else:    
                     self.height_desired -= 0.005
-            
-            if self.counter_runnning:
-                self.count += 1
         
         control_command = [vx, vy, vyaw, self.height_desired]
-
-        #wait for the robot to be stable (count > 100), then wait the detection of the landing pad to send the landing order
-        if self.state == State.NEXT_SETPOINT and not self.landing_found and self.count > 120 and sensor_data['range.zrange'] < 470:
-            self.state = State.LANDING
-            self.counter_runnning = False
-            self.count = 0
-            self.height_desired -= 0.005
-            control_command = [0.0, 0.0, 0.0, self.height_desired]
-            return control_command
-        
-        # Get the goal position and drone position to compute ditance to setpoint
-        if self.landing_found:
-            x_goal, y_goal = x_landing, y_landing
-        else:
-            x_goal, y_goal = self.setpoints[self.index_current_setpoint]
-
-        x_drone, y_drone = sensor_data['stateEstimate.x'] + x_landing, sensor_data['stateEstimate.y'] + y_landing
-        distance_drone_to_goal = np.linalg.norm([x_goal - x_drone, y_goal- y_drone])
-
-        print("x : ", x_drone, " | y : ", y_drone, " | next_point : ", x_goal, ", ", y_goal)
-
-        # When the drone reaches the goal setpoint, e.g., distance < 0.1m
-        if (self.state == State.NEXT_SETPOINT or self.state == State.OBS_AVOID) and distance_drone_to_goal < 0.1:
-            # Select the next setpoint as the goal position
-            if self.landing_found: # for the last landing
-                self.state = State.LANDING
-                self.counter_runnning = False
-                self.count = 0
-                self.height_desired -= 0.005
-                control_command = [0.0, 0.0, 0.0, self.height_desired]
-                return control_command
-            elif self.inverted:
-                self.index_current_setpoint -= 1
-            else:
-                self.index_current_setpoint += 1
-            self.avoid_dir = 0
-            # if the gait is static, no need to rotate, when oscillation, don't want to rotate
-            if gait == Gait.STATIC or gait == Gait.OSCILLATION:
-                self.state = State.NEXT_SETPOINT
-                self.count_pid = 0.0
-            else:
-                self.state = State.ROTATE
-    
-
-        #get proximity sensor data
-        front_prox = sensor_data['range.front']
-        left_prox = sensor_data['range.left']
-        right_prox = sensor_data['range.right']
-            
-        # direction command to next setpoint
-        if self.state == State.NEXT_SETPOINT:
-            control_command = self.move(x_goal, y_goal, sensor_data)
-            return control_command
-
-        #default, hover
-        control_command = [0.0, 0.0, 0.0, self.height_desired]
-        return control_command
