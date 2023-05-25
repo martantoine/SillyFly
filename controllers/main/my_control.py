@@ -120,7 +120,13 @@ def generate_preplanned_path(step_size, coord_min, coord_max, top, debug=False):
 
 def c2d(continuous):
     return int(np.clip(continuous / map_res, 0, np.inf))
- 
+
+def array2Coord(array):
+    coord_list = []
+    for a in array:
+        coord_list = coord_list.append(Coord(a[0], a[1]))
+    return coord_list    
+
 def occupancy_map(current_pos, sensor_data):
     global obstacle_map
     yaw = np.deg2rad(sensor_data['stabilizer.yaw'])
@@ -331,8 +337,8 @@ class MyController():
                     else:
                         tmp = find_x_positive_free_cell(self.current_pos)
                         #self.global_goals = [Coord(3.7, 0.0)]
-                        self.global_goals = astar(obstacle_map, [c2d(self.current_pos.x), c2d(self.current_pos.y)], [c2d(tmp.x), c2d(tmp.y)])
-
+                        self.global_goals = array2Coord(astar(obstacle_map, [c2d(self.current_pos.x), c2d(self.current_pos.y)], [c2d(tmp.x), c2d(tmp.y)]))
+                        print("astar is finnnnne")
             case State.SCANNING_LANDING_PAD:
                 if self.global_goals: # check if the array is not empty
                     if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
