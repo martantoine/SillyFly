@@ -3,7 +3,6 @@
 import numpy as np
 from pid_control import pid_velocity_fixed_height_controller
 from my_control import MyController
-import example
 import time, random
 
 import logging

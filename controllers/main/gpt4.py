@@ -115,30 +115,30 @@ def display_map(map, path):
 
     plt.show()
 
-def generate_random_map(rows, cols, probabilities):
-    map = []
-    for _ in range(rows):
-        row = []
-        for _ in range(cols):
-            value = random.choices([-1, 0, 1], probabilities)[0]
-            row.append(value)
-        map.append(row)
-    map[0][0] = 1
-    map[rows-1][cols-1] = 1
+#def generate_random_map(rows, cols, probabilities):
+#    map = []
+#    for _ in range(rows):
+#        row = []
+#        for _ in range(cols):
+#            value = random.choices([-1, 0, 1], probabilities)[0]
+#            row.append(value)
+#        map.append(row)
+#    map[0][0] = 1
+#    map[rows-1][cols-1] = 1
 
     return map
 
 # Example usage:
-probabilities = [0.3,0.4,0.4]
-map = generate_random_map(30,15,probabilities)
-
-start = (0, 0)
-goal = (29, 14)
-
-
-path = astar(map, start, goal)
-if path:
-    print("Path found:", path)
-    display_map(map, path)
-else:
-    print("Path not found!")
+#probabilities = [0.3,0.4,0.4]
+#map = generate_random_map(30,15,probabilities)
+#
+#start = (0, 0)
+#goal = (29, 14)
+#
+#
+#path = astar(map, start, goal)
+#if path:
+#    print("Path found:", path)
+#    display_map(map, path)
+#else:
+#    print("Path not found!")

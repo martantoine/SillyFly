@@ -91,7 +91,7 @@ Super parameters
 """
 gait = Gait.STRAIGHT # Gait of the robot
 mode = Mode.DUMB
-lateral_threshold = 0.1 # in meters
+lateral_threshold = 0.05 # in meters
 
 map_min = Coord(0.0, 0.0)
 map_max = Coord(5.0, 3.0)
@@ -112,7 +112,7 @@ preplanned_path = []
 obstacle_map = np.zeros((map_nx, map_ny)) # 0 = unknown, 1 = free, -1 = occupied
 
 def find_x_positive_free_cell(current_pos): #TODO: implement this function
-    return current_pos + Coord(0.1, 0.0)
+    return current_pos + Coord(0.25, 0.0)
 
 def find_most_interesting_cell(current_pos): #TODO: implement this function
     return Coord(0.0, 0.0)
@@ -141,6 +141,9 @@ def generate_preplanned_path(step_size, coord_min, coord_max, top, debug=False):
         for point in preplanned_path:
             print(point)
 
+def c2d(continuous):
+    return int(np.clip(continuous / map_res, 0, np.inf))
+ 
 def occupancy_map(current_pos, sensor_data):
     global obstacle_map
     yaw = sensor_data['stabilizer.yaw']
@@ -148,13 +151,13 @@ def occupancy_map(current_pos, sensor_data):
     for j in range(4): # 4 sensors
         yaw_sensor = yaw + j*np.pi/2 #yaw positive is counter clockwise
         if j == 0:
-            measurement = sensor_data['range_front']
+            measurement = sensor_data['range.front']
         elif j == 1:
-            measurement = sensor_data['range_left']
+            measurement = sensor_data['range.left']
         elif j == 2:
-            measurement = sensor_data['range_back']
+            measurement = sensor_data['range.back']
         elif j == 3:
-            measurement = sensor_data['range_right']
+            measurement = sensor_data['range.right']
         
         for i in range(int(range_max / map_res)): # range is 2 meters
             dist = i * map_res
@@ -162,23 +165,22 @@ def occupancy_map(current_pos, sensor_data):
             idx_y = int(np.round((current_pos.y - map_min.y + dist*np.sin(yaw_sensor)) / map_res, 0))
 
             # make sure the point is within the map
-            if idx_x < 0 or idx_x >= map.shape[0] or idx_y < 0 or idx_y >= map.shape[1] or dist > range_max:
+            if idx_x < 0 or idx_x >= obstacle_map.shape[0] or idx_y < 0 or idx_y >= obstacle_map.shape[1] or dist > range_max:
                 break
 
             # update the map
             if dist < measurement:
-                map[idx_x, idx_y] += conf
+                obstacle_map[idx_x, idx_y] += conf
             else:
-                map[idx_x, idx_y] -= conf
+                obstacle_map[idx_x, idx_y] -= conf
                 break
     
-    map = np.clip(map, -1, 1) # certainty can never be more than 100%
-    return map
+    obstacle_map = np.clip(obstacle_map, -1, 1) # certainty can never be more than 100%
+    return obstacle_map
 
 class MyController():
     def __init__(self):
         self.current_pos  = Coord(0.0, 0.0)
-        self.local_goal   = Coord(0.0, 0.0)
         self.global_goals = []
         self.state = State.TAKE_OFF_1
 
@@ -264,17 +266,18 @@ class MyController():
 
         global gait, x_landing, y_landing
         
-        direction = Coord.angle(self.current_pos, self.local_goal)
-        
+        direction = 0.0 # Coord.angle(self.current_pos, self.global_goals[0])
+        dir2face = 0.0
+
         if gait == Gait.STATIC:
             dir2face = 0.0
         elif gait == Gait.STRAIGHT:
             dir2face = direction
         elif gait == Gait.OSCILLATION:
-            dir2face = direction + self.amp_oscillation * np.sin(2*np.pi*self.freq_oscillation*self.count_pid)
+            dir2face = direction + np.deg2rad(self.amp_oscillation) * np.sin(2*np.pi*self.freq_oscillation*self.count_pid)
             self.count_pid += 0.02
 
-        yaw_rate = self.yaw_controller(dir2face, sensor_data)
+        yaw_rate = self.yaw_controller(np.rad2deg(dir2face), sensor_data)
 
         # compute the forward & left speed of the robot according to the desired direction and the current yaw
         direction_robot = np.rad2deg(direction) - sensor_data['stabilizer.yaw']
@@ -312,6 +315,8 @@ class MyController():
         if keyboard.is_pressed('space'):
             self.state = State.EMERGENCY        
 
+        print(self.state.name)
+
         match self.state:
             case State.EMERGENCY:
                 if keyboard.is_pressed('space'):
@@ -335,11 +340,11 @@ class MyController():
                         self.global_goals.pop(0) #delete the first element
                 else:
                     if self.current_pos.x > 3.5:
-                        self.state = State.SCANNING_LANDING_PAD
+                        self.state = State.EMERGENCY
                     else:
                         tmp = find_x_positive_free_cell(self.current_pos)
-                        self.globals_path = astar(obstacle_map, [self.current_pos.x / map_res, self.current_pos.y / map_res],
-                                                  [tmp.x / map_res, tmp.y / map_res])
+                        self.global_goals = [Coord(3.7, 0.0)]
+                        #self.global_goals = astar(obstacle_map, [c2d(self.current_pos.x), c2d(self.current_pos.y)], [c2d(tmp.x), c2d(tmp.y)])
 
             case State.SCANNING_LANDING_PAD:
                 if self.global_goals: # check if the array is not empty
@@ -355,8 +360,8 @@ class MyController():
                             i += 1 # skip if cell blocked by obstacle
                         tmp = preplanned_path[i]
                         i += 1 #increment the counter for future step
-                    self.globals_path = astar(obstacle_map, [self.current_pos.x / map_res, self.current_pos.y / map_res],
-                                             [tmp.x / map_res, tmp.y / map_res])
+                    self.globals_path = astar(obstacle_map, [int(self.current_pos.x / map_res), int(self.current_pos.y / map_res)],
+                                             [int(tmp.x / map_res), int(tmp.y / map_res)])
 
             case State.LAND_1:
                 if sensor_data['range.zrange'] < 20: # True if has landed
@@ -372,7 +377,7 @@ class MyController():
                     else:
                         self.global_goals.pop(0) #delete the first element
                 else:
-                    self.globals_path = astar(obstacle_map, [self.current_pos.x / map_res, self.current_pos.y / map_res],
+                    self.globals_path = astar(obstacle_map, [int(self.current_pos.x / map_res), int(self.current_pos.y / map_res)],
                                               [0, 0])
 
             case State.LAND_2:
@@ -383,3 +388,5 @@ class MyController():
                     self.height_desired -= 0.005
         
         control_command = [vx, vy, vyaw, self.height_desired]
+        print(self.current_pos)
+        return control_command
