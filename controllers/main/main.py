@@ -159,8 +159,9 @@ if __name__ == '__main__':
                 #drone.commander.send_stop_setpoint()
                 drone.commander.send_hover_setpoint(control_commands[0], control_commands[1], control_commands[2], control_commands[3])
             else: #stop the motors and exit the program
+                control_commands = my_controller.step_control(sensor_data)
                 drone.commander.send_stop_setpoint()
-                break
+                #break
                 
 
         time.sleep(0.01)

@@ -1,7 +1,7 @@
 import heapq
 import math
 import matplotlib.pyplot as plt
-#import random
+import random
 from Coord import *
 
 class Node:
@@ -29,9 +29,9 @@ def get_neighbors(current, map):
         y = current[1] + dy
         if 0 <= x < len(map) and 0 <= y < len(map[0]) and map[x][y] != -1:
             
-            if map[x][y] == 1:
+            if abs(map[x][y] - 1) < 0.1:
                 cost = 1
-            if map[x][y] == 0:
+            if abs(map[x][y]) < 0.1:
                 cost = 2
     
             if dx != 0 and dy != 0:
@@ -61,7 +61,7 @@ def astar(map, start, goal):
         current_position = current_node.position
 
         if current_position == goal:
-            print("Cost:", current_node.cost)
+            #print("Cost:", current_node.cost)
             return reconstruct_path(current_node)
 
         closed_set.add(current_position)
@@ -93,53 +93,57 @@ def astar(map, start, goal):
 
     return None
 
-#def display_map(map, path):
-#    fig, ax = plt.subplots()
-#    ax.set_aspect('equal')
-#    ax.set_xlim(0, len(map[0]))
-#    ax.set_ylim(0, len(map))
-#
-#    # Display the map
-#    for i in range(len(map)):
-#        for j in range(len(map[0])):
-#            if map[i][j] == -1:
-#                ax.add_patch(plt.Rectangle((j, i), 1, 1, facecolor='black'))
-#            elif map[i][j] == 1:
-#                ax.add_patch(plt.Rectangle((j, i), 1, 1, facecolor='white'))
-#            elif map[i][j] == 0:
-#                ax.add_patch(plt.Rectangle((j, i), 1, 1, facecolor='lightgray'))
-#
-#    # Mark the path
-#    if path:
-#        path_x, path_y = zip(*path)
-#        ax.plot(path_y, path_x, marker='*', color='red')
-#
-#    plt.show()
+def display_map(map, path):
+    fig, ax = plt.subplots()
+    ax.set_aspect('equal')
+    ax.set_xlim(0, len(map[0]))
+    ax.set_ylim(0, len(map))
 
-#def generate_random_map(rows, cols, probabilities):
-#    map = []
-#    for _ in range(rows):
-#        row = []
-#        for _ in range(cols):
-#            value = random.choices([-1, 0, 1], probabilities)[0]
-#            row.append(value)
-#        map.append(row)
-#    map[0][0] = 1
-#    map[rows-1][cols-1] = 1
+    # Display the map
+    for i in range(len(map)):
+        for j in range(len(map[0])):
+            if map[i][j] == -1:
+                ax.add_patch(plt.Rectangle((j, i), 1, 1, facecolor='black'))
+            elif map[i][j] == 1:
+                ax.add_patch(plt.Rectangle((j, i), 1, 1, facecolor='white'))
+            elif map[i][j] == 0:
+                ax.add_patch(plt.Rectangle((j, i), 1, 1, facecolor='lightgray'))
 
-#    return map
+    # Mark the path
+    if path:
+        path_x, path_y = zip(*path)
+        ax.plot(path_y, path_x, marker='*', color='red')
 
+    plt.show()
+
+def generate_random_map(rows, cols, probabilities):
+    map = []
+    for _ in range(rows):
+        row = []
+        for _ in range(cols):
+            value = random.choices([-1, 0, 1], probabilities)[0]
+            row.append(value)
+        map.append(row)
+    map[0][0] = 1
+    map[rows-1][cols-1] = 1
+
+    return map
+
+""""
 # Example usage:
-#probabilities = [0.3,0.4,0.4]
-#map = generate_random_map(30,15,probabilities)
+probabilities = [0.3,0.4,0.4]
+map = generate_random_map(int(5.0/0.2), int(3.0/0.2),probabilities)
+print(type(map))
+print(map)
 #
-#start = (0, 0)
-#goal = (29, 14)
+start = (0, 0)
+goal = (2, 2)
 #
 #
-#path = astar(map, start, goal)
-#if path:
-#    print("Path found:", path)
-#    display_map(map, path)
-#else:
-#    print("Path not found!")
+path = astar(map, start, goal)
+if path:
+    print("Path found:", path)
+    display_map(map, path)
+else:
+    print("Path not found!")
+"""

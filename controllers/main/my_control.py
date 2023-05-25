@@ -31,8 +31,9 @@ import numpy as np
 from enum import Enum
 import keyboard
 import matplotlib.pyplot as plt
-from gpt4 import astar
+from gpt4 import *
 from Coord import *
+import cv2
 
 class State(Enum): # state machine for the high-level control
     TAKE_OFF_1 = 0
@@ -56,9 +57,9 @@ class Gait(Enum): # gait of the robot
 """
 Super parameters
 """
-gait = Gait.STRAIGHT # Gait of the robot
+gait = Gait.STATIC # Gait of the robot
 mode = Mode.DUMB
-lateral_threshold = 0.05 # in meters
+lateral_threshold = 0.2 # in meters
 
 map_min = Coord(0.0, 0.0)
 map_max = Coord(5.0, 3.0)
@@ -121,10 +122,13 @@ def generate_preplanned_path(step_size, coord_min, coord_max, top, debug=False):
 def c2d(continuous):
     return int(np.clip(continuous / map_res, 0, np.inf))
 
+def d2c(discrete):
+    return discrete * map_res
+
 def array2Coord(array):
     coord_list = []
     for a in array:
-        coord_list = coord_list.append(Coord(a[0], a[1]))
+        coord_list.append(Coord(d2c(a[0]), d2c(a[1])))
     return coord_list    
 
 def occupancy_map(current_pos, sensor_data):
@@ -167,11 +171,11 @@ class MyController():
         self.start_pos    = Coord(-1.0, -1.0)  
         self.current_pos  = Coord(0.0, 0.0)
         self.global_goals = []
-        self.state = State.TAKE_OFF_1
+        self.state = State.GO_TO_LANDING_REGION
         
         generate_preplanned_path(0.25, Coord(3.5, 0.0), Coord(5.0, 3.0), True)
 
-        self.flying_height = 0.3 # m
+        self.flying_height = 0.4 # m
         self.height_desired = 0
         self.avoid_dir = 0
         self.yaw_p = 0.4
@@ -302,7 +306,7 @@ class MyController():
 
 
         obstacle_map = occupancy_map(self.current_pos, sensor_data)
-
+        inflated_map = obstacle_map
         
         # if detects Q key, land and stop the program, must be the first condition in the function
         if keyboard.is_pressed('space'):
@@ -326,6 +330,7 @@ class MyController():
                     self.state = State.GO_TO_LANDING_REGION
 
             case State.GO_TO_LANDING_REGION:
+                self.height_desired = -1
                 if self.global_goals: # check if the array is not empty
                     if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
                         vx, vy, vyaw, _ = self.move(sensor_data)
@@ -336,9 +341,20 @@ class MyController():
                         self.state = State.EMERGENCY
                     else:
                         tmp = find_x_positive_free_cell(self.current_pos)
-                        #self.global_goals = [Coord(3.7, 0.0)]
-                        self.global_goals = array2Coord(astar(obstacle_map, [c2d(self.current_pos.x), c2d(self.current_pos.y)], [c2d(tmp.x), c2d(tmp.y)]))
-                        print("astar is finnnnne")
+                        
+                        #obstacle_map_masked = obstacle_map
+                        #for x in range(len(obstacle_map_masked)):
+                        #    for y in range(len(obstacle_map_masked[0])):
+                        #        if obstacle_map_masked[x][y] != -1:
+                        #            obstacle_map_masked[x][y] = 0
+                            
+                        #mean_mat = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+                        #inflated_map = cv2.dilate(obstacle_map_masked, mean_mat)
+                        #inflated_map = inflated_map + obstacle_map[np.where(obstacle_map == 1)]
+                        
+                        obs_tmp = inflated_map.astype(int).tolist()    
+                        self.global_goals = array2Coord(astar(obs_tmp, (c2d(self.current_pos.x), c2d(self.current_pos.y)), (c2d(tmp.x), c2d(tmp.y))))
+                    
             case State.SCANNING_LANDING_PAD:
                 if self.global_goals: # check if the array is not empty
                     if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
@@ -381,9 +397,14 @@ class MyController():
                     self.height_desired -= 0.005
         
         if t % 100 == 0:
-            plt.imsave("map.png", np.flip(obstacle_map, 1), vmin=-1, vmax=1, cmap='gray', origin='lower')
+            #obstacle_map_drone = inflated_map
+            #obstacle_map_drone[c2d(self.current_pos.x)][c2d(self.current_pos.y)] = 2 
+            plt.imsave("map.png", np.flip(obstacle_map.astype(int), 1), vmin=-1, vmax=2, cmap='gray', origin='lower')
+            plt.imsave("inflated.png", np.flip(inflated_map.astype(int), 1), vmin=-1, vmax=2, cmap='gray', origin='lower')
+            
+            print(c2d(self.current_pos.x), c2d(self.current_pos.y), sensor_data['stabilizer.yaw'])
+            #print(inflated_map)
         t +=1
 
-        print(self.current_pos, sensor_data['stabilizer.yaw'])
         control_command = [vx, vy, vyaw, self.height_desired]
         return control_command
