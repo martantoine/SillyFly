@@ -61,26 +61,29 @@ class AStarPlanner:
         output:
             rx: x position list of the final path
             ry: y position list of the final path
+                --> in order to return the map to follow
         """
 
+        # Initialize start and goal node, Node(index_x,index_y,cost_parent_index)
         start_node = self.Node(self.calc_xy_index(sx, self.min_x),
                                self.calc_xy_index(sy, self.min_y), 0.0, -1)
         goal_node = self.Node(self.calc_xy_index(gx, self.min_x),
                               self.calc_xy_index(gy, self.min_y), 0.0, -1)
 
+        # Create two lists
+        # Open_set is a list of explored cells but whose neighbors have not all been explored
+        # Closed_set is a list of explored cells whose neighbors have all been explored
         open_set, closed_set = dict(), dict()
-        open_set[self.calc_grid_index(start_node)] = start_node
+        open_set[self.calc_grid_index(start_node)] = start_node # add start node to open set
 
         while True:
             if len(open_set) == 0:
                 print("Open set is empty..")
                 break
 
-            c_id = min(
-                open_set,
-                key=lambda o: open_set[o].cost + self.calc_heuristic(goal_node,
-                                                                     open_set[
-                                                                         o]))
+            # Get the cell id with the lowest cost
+            c_id = min(open_set, key=lambda o: 
+                          open_set[o].cost + self.calc_heuristic(goal_node,open_set[o]))
             current = open_set[c_id]
 
             # show graph
@@ -89,11 +92,11 @@ class AStarPlanner:
                          self.calc_grid_position(current.y, self.min_y), "xc")
                 # for stopping simulation with the esc key.
                 plt.gcf().canvas.mpl_connect('key_release_event',
-                                             lambda event: [exit(
-                                                 0) if event.key == 'escape' else None])
+                                             lambda event: [exit(0) if event.key == 'escape' else None])
                 if len(closed_set.keys()) % 10 == 0:
                     plt.pause(0.001)
 
+            # If the current node is the goal node, we have found the optimal path
             if current.x == goal_node.x and current.y == goal_node.y:
                 print("Find goal")
                 goal_node.parent_index = current.parent_index
@@ -146,9 +149,13 @@ class AStarPlanner:
 
     @staticmethod
     def calc_heuristic(n1, n2):
-        w = 1.0  # weight of heuristic
-        d = w * math.hypot(n1.x - n2.x, n1.y - n2.y)
-        return d
+        deltaX = abs(n1.x - n2.x)
+        deltaY = abs(n1.y - n2.x)
+        
+        if (deltaX > deltaY):
+            return 14 * deltaY + 10 * (deltaX - deltaY)
+        return 14 * deltaX + 10 * (deltaY - deltaX)
+            
 
     def calc_grid_position(self, index, min_position):
         """
