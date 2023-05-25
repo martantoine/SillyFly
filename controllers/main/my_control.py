@@ -125,8 +125,8 @@ class MyController():
 
         # initial path planning (no obstacle known)
         self.max_distance_setpoints = 0.25
-        self.init_setpoints = [[x_landing, y_landing], [0.5, 0.1], [0.5, 0.5], [0.8, 0.5], [0.8, 0.0]] # test path
-        #self.init_setpoints = [[x_landing, y_landing], [3.7, 0.1], [3.7, 2.9], [4.0, 2.9], [4.0, 0.1], [4.3, 0.1], [4.3, 2.9], [4.6, 2.9], [4.6, 0.1], [4.9, 0.1], [4.9,2.9]]
+        #self.init_setpoints = [[x_landing, y_landing], [0.5, 0.1], [0.5, 0.5], [0.8, 0.5], [0.8, 0.0]] # test path
+        self.init_setpoints = [[x_landing, y_landing], [3.7, 0.1], [3.7, 2.9], [4.0, 2.9], [4.0, 0.1], [4.3, 0.1], [4.3, 2.9], [4.6, 2.9], [4.6, 0.1], [4.9, 0.1], [4.9,2.9]]
         self.setpoints = self.path_interpolate(self.init_setpoints) # adding sethpoints to have less than max_distance_setpoints between each setpoint
         self.index_current_setpoint = 0
 
@@ -216,21 +216,24 @@ class MyController():
 
         return yaw_rate
 
-    def move(self, direction, sensor_data):
+    def move(self, x_goal, y_goal, sensor_data):
         """
         move the robot in the given direction
 
         input :
-        direction : desired absolute direction [deg]
-        face : if True, the robot will face the direction
+        x_goal : x coordinate of the goal
+        y_goal : y coordinate of the goal
         sensor_data : sensor data from the drone
 
         output :
         control_command : [v_forward, v_left, yaw_rate, height_desired]
         """
 
-        global gait
+        global gait, x_landing, y_landing
         
+        x_drone = sensor_data['stateEstimate.x'] + x_landing
+        y_drone = sensor_data['stateEstimate.y'] + y_landing
+        direction = np.rad2deg(np.arctan2(y_goal - y_drone, x_goal - x_drone))
 
         if gait == Gait.STATIC:
             dir2face = 0.0
@@ -374,6 +377,8 @@ class MyController():
         x_drone, y_drone = sensor_data['stateEstimate.x'] + x_landing, sensor_data['stateEstimate.y'] + y_landing
         distance_drone_to_goal = np.linalg.norm([x_goal - x_drone, y_goal- y_drone])
 
+        print("x : ", x_drone, " | y : ", y_drone, " | next_point : ", x_goal, ", ", y_goal)
+
         # When the drone reaches the goal setpoint, e.g., distance < 0.1m
         if (self.state == State.NEXT_SETPOINT or self.state == State.OBS_AVOID) and distance_drone_to_goal < 0.1:
             # Select the next setpoint as the goal position
@@ -404,7 +409,7 @@ class MyController():
             
         # direction command to next setpoint
         if self.state == State.NEXT_SETPOINT:
-            control_command = self.move(np.rad2deg(np.arctan2(y_goal - y_drone, x_goal - x_drone)), sensor_data)
+            control_command = self.move(x_goal, y_goal, sensor_data)
             return control_command
 
         #default, hover
