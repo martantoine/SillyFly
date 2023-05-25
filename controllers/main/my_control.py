@@ -30,7 +30,7 @@ import math
 import numpy as np
 from enum import Enum
 import keyboard
-from matplotlib import pyplot as plt
+import matplotlib.pyplot as plt
 from gpt4 import astar
 
 class Coord:
@@ -95,10 +95,10 @@ lateral_threshold = 0.05 # in meters
 
 map_min = Coord(0.0, 0.0)
 map_max = Coord(5.0, 3.0)
-map_res = 0.25
+map_res = 0.2
 map_nx = int((map_max.x - map_min.x) / map_res)
 map_ny = int((map_max.y - map_min.y) / map_res)
-range_max = 2
+range_max = 2.0
 conf = 1
 
 plot = False # plot the yaw controller & other data
@@ -108,6 +108,7 @@ plot_PID = False # plot the PID controller
 """
 Global variables
 """
+t = 0
 preplanned_path = []
 obstacle_map = np.zeros((map_nx, map_ny)) # 0 = unknown, 1 = free, -1 = occupied
 
@@ -146,7 +147,7 @@ def c2d(continuous):
  
 def occupancy_map(current_pos, sensor_data):
     global obstacle_map
-    yaw = sensor_data['stabilizer.yaw']
+    yaw = np.deg2rad(sensor_data['stabilizer.yaw'])
     
     for j in range(4): # 4 sensors
         yaw_sensor = yaw + j*np.pi/2 #yaw positive is counter clockwise
@@ -169,8 +170,9 @@ def occupancy_map(current_pos, sensor_data):
                 break
 
             # update the map
-            if dist < measurement:
-                obstacle_map[idx_x, idx_y] += conf
+            if dist * 1000.0 < measurement:
+                if obstacle_map[idx_x, idx_y] != -1: 
+                    obstacle_map[idx_x, idx_y] += conf
             else:
                 obstacle_map[idx_x, idx_y] -= conf
                 break
@@ -187,7 +189,7 @@ class MyController():
         
         generate_preplanned_path(0.25, Coord(3.5, 0.0), Coord(5.0, 3.0), True)
 
-        self.flying_height = 0.5 # m
+        self.flying_height = 0.3 # m
         self.height_desired = 0
         self.avoid_dir = 0
         self.yaw_p = 0.4
@@ -304,6 +306,7 @@ class MyController():
         global lateral_threshold
         global obstacle_map
         global map_res
+        global t
         vx = 0.0
         vy = 0.0
         vyaw = 0.0
@@ -316,14 +319,14 @@ class MyController():
             self.current_pos = Coord(sensor_data['stateEstimate.x'], sensor_data['stateEstimate.y']) - self.start_pos
 
 
-        occupancy_map(self.current_pos, sensor_data)
+        obstacle_map = occupancy_map(self.current_pos, sensor_data)
 
         
         # if detects Q key, land and stop the program, must be the first condition in the function
         if keyboard.is_pressed('space'):
             self.state = State.EMERGENCY        
 
-        print(self.state.name)
+        #print(self.state.name)
 
         match self.state:
             case State.EMERGENCY:
@@ -335,7 +338,7 @@ class MyController():
                     print("EMERGENCY END")
 
             case State.TAKE_OFF_1:
-                if sensor_data['range.zrange'] < 490:
+                if sensor_data['range.zrange'] < 290:
                     self.height_desired = self.flying_height
                 else:
                     self.state = State.GO_TO_LANDING_REGION
@@ -395,6 +398,10 @@ class MyController():
                 else:    
                     self.height_desired -= 0.005
         
+        if t % 100 == 0:
+            plt.imsave("map.png", np.flip(obstacle_map, 1), vmin=-1, vmax=1, cmap='gray', origin='lower')
+        t +=1
+
+        print(self.current_pos, sensor_data['stabilizer.yaw'])
         control_command = [vx, vy, vyaw, self.height_desired]
-        print(self.current_pos)
         return control_command
