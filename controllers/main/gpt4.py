@@ -1,7 +1,8 @@
 import heapq
 import math
 import matplotlib.pyplot as plt
-import random
+#import random
+from Coord import *
 
 class Node:
     def __init__(self, position, parent=None, cost=0, heuristic=0):
@@ -15,28 +16,27 @@ class Node:
         return self.priority < other.priority or (self.priority == other.priority and self.cost > other.cost)
 
 def calculate_heuristic(current, goal):
-    dx = abs(current[0] - goal[0])
-    dy = abs(current[1] - goal[1])
+    dx = abs(current.x - goal.x)
+    dy = abs(current.y - goal.y)
     return min(dx, dy) * 14 + abs(dx - dy) * 10  
 
 def get_neighbors(current, map):
     neighbors = []
-    directions = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
+    directions = [Coord(1, 0), Coord(-1, 0), Coord(0, 1), Coord(0, -1), Coord(1, 1), Coord(1, -1), Coord(-1, 1), Coord(-1, -1)]
     
-    for dx, dy in directions:
-        x = current[0] + dx
-        y = current[1] + dy
-        if 0 <= x < len(map) and 0 <= y < len(map[0]) and map[x][y] != -1:
+    for d in directions:
+        xy = current + d
+        if 0 <= xy.x < len(map) and 0 <= xy.y < len(map[0]) and map[xy.x][xy.y] != -1:
             
-            if map[x][y] == 1:
+            if map[xy.x][xy.y] == 1:
                 cost = 1
-            if map[x][y] == 0:
+            if map[xy.x][xy.y] == 0:
                 cost = 2
     
-            if dx != 0 and dy != 0:
+            if d.x != 0 and d.y != 0:
                 cost *= math.sqrt(2)
 
-            neighbors.append((x, y, cost))
+            neighbors.append(Coord(xy.x, xy.y), cost)
             
     return neighbors 
 
@@ -68,13 +68,13 @@ def astar(map, start, goal):
         neighbors = get_neighbors(current_position, map)
         
         for neighbor_position in neighbors:
-            if neighbor_position[:2] in closed_set:
+            if neighbor_position[0] in closed_set:
                 continue
 
-            neighbor_cost = current_node.cost + neighbor_position[2]
-            neighbor_heuristic = calculate_heuristic(neighbor_position[:2], goal)
+            neighbor_cost = current_node.cost + neighbor_position[1]
+            neighbor_heuristic = calculate_heuristic(neighbor_position[0], goal)
             neighbor_node = Node(
-                neighbor_position[:2],
+                neighbor_position[0],
                 parent=current_node,
                 cost=neighbor_cost,
                 heuristic=neighbor_heuristic
@@ -92,28 +92,28 @@ def astar(map, start, goal):
 
     return None
 
-def display_map(map, path):
-    fig, ax = plt.subplots()
-    ax.set_aspect('equal')
-    ax.set_xlim(0, len(map[0]))
-    ax.set_ylim(0, len(map))
-
-    # Display the map
-    for i in range(len(map)):
-        for j in range(len(map[0])):
-            if map[i][j] == -1:
-                ax.add_patch(plt.Rectangle((j, i), 1, 1, facecolor='black'))
-            elif map[i][j] == 1:
-                ax.add_patch(plt.Rectangle((j, i), 1, 1, facecolor='white'))
-            elif map[i][j] == 0:
-                ax.add_patch(plt.Rectangle((j, i), 1, 1, facecolor='lightgray'))
-
-    # Mark the path
-    if path:
-        path_x, path_y = zip(*path)
-        ax.plot(path_y, path_x, marker='*', color='red')
-
-    plt.show()
+#def display_map(map, path):
+#    fig, ax = plt.subplots()
+#    ax.set_aspect('equal')
+#    ax.set_xlim(0, len(map[0]))
+#    ax.set_ylim(0, len(map))
+#
+#    # Display the map
+#    for i in range(len(map)):
+#        for j in range(len(map[0])):
+#            if map[i][j] == -1:
+#                ax.add_patch(plt.Rectangle((j, i), 1, 1, facecolor='black'))
+#            elif map[i][j] == 1:
+#                ax.add_patch(plt.Rectangle((j, i), 1, 1, facecolor='white'))
+#            elif map[i][j] == 0:
+#                ax.add_patch(plt.Rectangle((j, i), 1, 1, facecolor='lightgray'))
+#
+#    # Mark the path
+#    if path:
+#        path_x, path_y = zip(*path)
+#        ax.plot(path_y, path_x, marker='*', color='red')
+#
+#    plt.show()
 
 #def generate_random_map(rows, cols, probabilities):
 #    map = []
@@ -126,7 +126,7 @@ def display_map(map, path):
 #    map[0][0] = 1
 #    map[rows-1][cols-1] = 1
 
-    return map
+#    return map
 
 # Example usage:
 #probabilities = [0.3,0.4,0.4]

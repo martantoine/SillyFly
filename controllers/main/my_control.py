@@ -32,40 +32,7 @@ from enum import Enum
 import keyboard
 import matplotlib.pyplot as plt
 from gpt4 import astar
-
-class Coord:
-    def __init__(self, x=0.0, y=0.0):
-        self.x = x
-        self.y = y
-
-    def __str__(self):
-        return "Point(%s,%s)"%(self.x, self.y) 
-
-    def __add__(self, other):
-        return Coord(self.x + other.x, self.y + other.y)
-    
-    def __sub__(self, other):
-        return Coord(self.x - other.x, self.y - other.y)
-    
-    def dist(self, other):
-        dx = self.x - other.x
-        dy = self.y - other.y
-        return math.sqrt(dx**2 + dy**2)
-
-    def angle(self, other):
-        angle = np.arctan2((other.y - self.y), (other.x - self.x))
-        return angle
-
-    def test():
-        '''Returns a point and distance'''
-        p1 = Coord(1.0, 1.0)
-        print(p1)
-        p2 = Coord(1.0,-1.0)
-        print(p2)
-        print(p1 + p2)
-        print(p1 - p2)
-        print(np.rad2deg(Coord.angle(p1, p2)))
-        print(Coord.dist(p1, p2))
+from Coord import *
 
 class State(Enum): # state machine for the high-level control
     TAKE_OFF_1 = 0
@@ -113,8 +80,17 @@ preplanned_path = []
 obstacle_map = np.zeros((map_nx, map_ny)) # 0 = unknown, 1 = free, -1 = occupied
 
 def find_x_positive_free_cell(current_pos): #TODO: implement this function
+    #tmp = np.zeros((1, map_ny))
+    #new_x = current_pos.x + 0.5
+    #for yi in range(map_ny):
+    #    tmpi = Coord.dist(current_pos, Coord(current_pos.x, yi * map_res))
+    #    if obstacle_map[c2d(new_x), yi] < 0.0:
+    #        tmpi += 1000.0
+    #    tmp[0, yi] = tmpi
+    #return Coord(new_x, np.argmin(tmp) * map_res)
     return current_pos + Coord(0.5, 0.0)
 
+    
 def find_most_interesting_cell(current_pos): #TODO: implement this function
     return Coord(0.0, 0.0)
 
@@ -354,8 +330,8 @@ class MyController():
                         self.state = State.EMERGENCY
                     else:
                         tmp = find_x_positive_free_cell(self.current_pos)
-                        self.global_goals = [Coord(3.7, 0.0)]
-                        #self.global_goals = astar(obstacle_map, [c2d(self.current_pos.x), c2d(self.current_pos.y)], [c2d(tmp.x), c2d(tmp.y)])
+                        #self.global_goals = [Coord(3.7, 0.0)]
+                        self.global_goals = astar(obstacle_map, [c2d(self.current_pos.x), c2d(self.current_pos.y)], [c2d(tmp.x), c2d(tmp.y)])
 
             case State.SCANNING_LANDING_PAD:
                 if self.global_goals: # check if the array is not empty
