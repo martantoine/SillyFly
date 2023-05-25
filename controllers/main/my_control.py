@@ -189,6 +189,8 @@ class MyController():
         self.global_goals = []
         self.state = State.TAKE_OFF_1
 
+        generate_preplanned_path(0.25, Coord(3.5, 0.0), Coord(5.0, 3.0), True)
+
         self.flying_height = 0.5 # m
         self.height_desired = 0
         self.avoid_dir = 0
@@ -208,7 +210,7 @@ class MyController():
         self.count = 0
         
 
-    def yaw_controller(self, yaw_command ,sensor_data):
+    def yaw_controller(self, yaw_command, sensor_data):
         """
         PID controller for yaw
 
@@ -278,17 +280,14 @@ class MyController():
         elif gait == Gait.OSCILLATION:
             dir2face = direction + self.amp_oscillation * np.sin(2*np.pi*self.freq_oscillation*self.count_pid)
             self.count_pid += 0.02
-            print("dir2face : ", dir2face, " | count : ", self.count_pid)
-        else:
-            print("ERROR : unknown gait")
 
         yaw_rate = self.yaw_controller(dir2face, sensor_data)
 
         # compute the forward & left speed of the robot according to the desired direction and the current yaw
-        direction_robot = direction - sensor_data['stabilizer.yaw']
-        if direction_robot > 180:
+        direction_robot = np.rad2deg(direction) - sensor_data['stabilizer.yaw']
+        while direction_robot > 180:
             direction_robot -= 360
-        elif direction_robot < -180:
+        while direction_robot < -180:
             direction_robot += 360
         v_forward = np.cos(np.deg2rad(direction_robot)) * self.speed
         v_left = np.sin(np.deg2rad(direction_robot)) * self.speed
@@ -307,6 +306,7 @@ class MyController():
         global mode
         global lateral_threshold
         global obstacle_map
+        global map_res
         vx = 0.0
         vy = 0.0
         vyaw = 0.0
@@ -337,7 +337,7 @@ class MyController():
             case State.GO_TO_LANDING_REGION:
                 if self.global_goals: # check if the array is not empty
                     if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
-                        control_command = self.move(sensor_data)
+                        vx, vy, vyaw, _ = self.move(sensor_data)
                     else:
                         self.global_goals.pop(0) #delete the first element
                 else:
@@ -349,14 +349,14 @@ class MyController():
             case State.SCANNING_LANDING_PAD:
                 if self.global_goals: # check if the array is not empty
                     if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
-                        control_command = self.move(sensor_data)
+                        vx, vy, vyaw, _ = self.move(sensor_data)
                     else:
                         self.global_goals.pop(0) #delete the first element
                 else:
                     if mode == Mode.SILLY:
                         tmp = find_most_interesting_cell()
                     elif mode == Mode.DUMB:
-                        while obstacle_map[preplanned_path[i].coords] != -1:
+                        while obstacle_map[preplanned_path[i].x / map_res, preplanned_path[i].y / map_res] != -1:
                             i += 1 # skip if cell blocked by obstacle
                         tmp = preplanned_path[i]
                         i += 1 #increment the counter for future step
@@ -372,7 +372,7 @@ class MyController():
             case State.GO_TO_TAKE_OFF_PAD:
                 if self.global_goals: # check if the array is not empty
                     if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
-                        control_command = self.move(sensor_data)
+                        vx, vy, vyaw, _ = self.move(sensor_data)
                     else:
                         self.global_goals.pop(0) #delete the first element
                 else:
