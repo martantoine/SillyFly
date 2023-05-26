@@ -173,8 +173,9 @@ class MyController():
         self.current_pos  = Coord(0.0, 0.0)
         self.global_goals = []
         self.state = State.TAKE_OFF_1
-        
-        generate_preplanned_path(0.25, Coord(3.5, 0.0), Coord(5.0, 3.0), True)
+        self.i = 0
+
+        generate_preplanned_path(0.5, Coord(3.5, 0.0), Coord(5.0, 3.0), True)
 
         self.flying_height = 0.4 # m
         self.height_desired = 0
@@ -291,6 +292,7 @@ class MyController():
         """
         global mode
         global lateral_threshold
+        global preplanned_path
         global obstacle_map
         global map_res
         global t
@@ -337,30 +339,28 @@ class MyController():
                 if sensor_data['range.zrange'] < 290:
                     self.height_desired = self.flying_height
                 else:
-                    self.state = State.GO_TO_LANDING_REGION
+                    self.state = State.SCANNING_LANDING_PAD
 
             case State.GO_TO_LANDING_REGION:
                 if self.global_goals: # check if the array is not empty
                     if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
                         vx, vy, vyaw, _ = self.move(sensor_data)
                     else:
-                        print("mini tmp:", self.global_goals[0])
+                        #print("mini tmp:", self.global_goals[0])
                         self.global_goals.pop(0) #delete the first element
                 else:
                     if self.current_pos.x > 3.5:
-                        print("put in emergy by 349")
-                        self.state = State.EMERGENCY
+                        #print("put in emergy by 349")
+                        self.state = State.SCANNING_LANDING_PAD
                     else:
                         tmp = find_x_positive_free_cell(self.current_pos, inflated_map)
-                        print("current:", self.current_pos, c2d(self.current_pos.x), c2d(self.current_pos.y), sensor_data['stabilizer.yaw'])
-                        print("tmp:", c2d(tmp.x), c2d(tmp.y), tmp)
+                        #print("current:", self.current_pos, c2d(self.current_pos.x), c2d(self.current_pos.y), sensor_data['stabilizer.yaw'])
+                        #print("tmp:", c2d(tmp.x), c2d(tmp.y), tmp)
                         #tmp = Coord(3.5, 1.0)
                         
                         obs_tmp = inflated_map.astype(int).tolist()    
                         self.global_goals = array2Coord(astar(obs_tmp, (c2d(self.current_pos.x), c2d(self.current_pos.y)), (c2d(tmp.x), c2d(tmp.y))))
-                        print("astar finished")
-
-        """
+                        
             case State.SCANNING_LANDING_PAD:
                 if self.global_goals: # check if the array is not empty
                     if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
@@ -371,12 +371,16 @@ class MyController():
                     if mode == Mode.SILLY:
                         tmp = find_most_interesting_cell()
                     elif mode == Mode.DUMB:
-                        while obstacle_map[preplanned_path[i].x / map_res, preplanned_path[i].y / map_res] != -1:
-                            i += 1 # skip if cell blocked by obstacle
-                        tmp = preplanned_path[i]
-                        i += 1 #increment the counter for future step
-                    self.globals_path = astar(obstacle_map, [int(self.current_pos.x / map_res), int(self.current_pos.y / map_res)],
-                                             [int(tmp.x / map_res), int(tmp.y / map_res)])
+                        #while obstacle_map[int(preplanned_path[self.i].x / map_res), int(preplanned_path[self.i].y / map_res)] != -1:
+                        #    self.i += 1 # skip if cell blocked by obstacle
+                        if self.i < len(preplanned_path):
+                            tmp = preplanned_path[self.i]
+                            self.i += 1 #increment the counter for future step
+                        else:
+                            self.i = 0
+                        print(tmp, self.current_pos)
+                    obs_tmp = inflated_map.astype(int).tolist()   
+                    self.global_goals = array2Coord(astar(obs_tmp, (c2d(self.current_pos.x), c2d(self.current_pos.y)), (c2d(tmp.x), c2d(tmp.y))))
 
             case State.LAND_1:
                 if sensor_data['range.zrange'] < 20: # True if has landed
@@ -401,8 +405,7 @@ class MyController():
                     print("ground reached")
                 else:    
                     self.height_desired -= 0.005
-        """
-
+        
         if t % 100 == 0:
             obstacle_map_drone = np.copy(obstacle_map)
             obstacle_map_drone[np.clip(c2d(self.current_pos.x), 0, map_nx)][np.clip(c2d(self.current_pos.y), 0, map_ny)] = 2 
