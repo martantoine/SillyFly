@@ -57,7 +57,7 @@ class Gait(Enum): # gait of the robot
 """
 Super parameters
 """
-gait = Gait.STATIC # Gait of the robot
+gait = Gait.STRAIGHT # Gait of the robot
 mode = Mode.DUMB
 lateral_threshold = 0.2 # in meters
 
@@ -80,16 +80,16 @@ t = 0
 preplanned_path = []
 obstacle_map = np.zeros((map_nx, map_ny)) # 0 = unknown, 1 = free, -1 = occupied
 
-def find_x_positive_free_cell(current_pos): #TODO: implement this function
-    #tmp = np.zeros((1, map_ny))
-    #new_x = current_pos.x + 0.5
-    #for yi in range(map_ny):
-    #    tmpi = Coord.dist(current_pos, Coord(current_pos.x, yi * map_res))
-    #    if obstacle_map[c2d(new_x), yi] < 0.0:
-    #        tmpi += 1000.0
-    #    tmp[0, yi] = tmpi
-    #return Coord(new_x, np.argmin(tmp) * map_res)
-    return current_pos + Coord(0.5, 0.0)
+def find_x_positive_free_cell(current_pos, inflated_map): #TODO: implement this function
+    tmp = np.zeros((1, map_ny))
+    new_x = current_pos.x + 0.5
+    for yi in range(map_ny):
+        tmpi = Coord.dist(current_pos, Coord(current_pos.x, yi * map_res))
+        if inflated_map[c2d(new_x), yi] < 0.0:
+            tmpi += 1000.0
+        tmp[0, yi] = tmpi
+    return Coord(new_x, np.argmin(tmp) * map_res)
+    #return current_pos + Coord(0.5, 0.0)
 
     
 def find_most_interesting_cell(current_pos): #TODO: implement this function
@@ -127,6 +127,7 @@ def d2c(discrete):
 
 def array2Coord(array):
     coord_list = []
+    #print(array)
     for a in array:
         coord_list.append(Coord(d2c(a[0]), d2c(a[1])))
     return coord_list    
@@ -171,7 +172,7 @@ class MyController():
         self.start_pos    = Coord(-1.0, -1.0)  
         self.current_pos  = Coord(0.0, 0.0)
         self.global_goals = []
-        self.state = State.GO_TO_LANDING_REGION
+        self.state = State.TAKE_OFF_1
         
         generate_preplanned_path(0.25, Coord(3.5, 0.0), Coord(5.0, 3.0), True)
 
@@ -306,7 +307,7 @@ class MyController():
 
 
         obstacle_map = occupancy_map(self.current_pos, sensor_data)
-        mean_mat = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        mean_mat = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
         obstacle_map_masked = np.copy(obstacle_map)
         for x in range(len(obstacle_map_masked)):
             for y in range(len(obstacle_map_masked[0])):
@@ -339,21 +340,27 @@ class MyController():
                     self.state = State.GO_TO_LANDING_REGION
 
             case State.GO_TO_LANDING_REGION:
-                self.height_desired = -1
                 if self.global_goals: # check if the array is not empty
                     if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
                         vx, vy, vyaw, _ = self.move(sensor_data)
                     else:
+                        print("mini tmp:", self.global_goals[0])
                         self.global_goals.pop(0) #delete the first element
                 else:
                     if self.current_pos.x > 3.5:
+                        print("put in emergy by 349")
                         self.state = State.EMERGENCY
                     else:
-                        tmp = find_x_positive_free_cell(self.current_pos)
+                        tmp = find_x_positive_free_cell(self.current_pos, inflated_map)
+                        print("current:", self.current_pos, c2d(self.current_pos.x), c2d(self.current_pos.y), sensor_data['stabilizer.yaw'])
+                        print("tmp:", c2d(tmp.x), c2d(tmp.y), tmp)
+                        #tmp = Coord(3.5, 1.0)
                         
                         obs_tmp = inflated_map.astype(int).tolist()    
                         self.global_goals = array2Coord(astar(obs_tmp, (c2d(self.current_pos.x), c2d(self.current_pos.y)), (c2d(tmp.x), c2d(tmp.y))))
-                    
+                        print("astar finished")
+
+        """
             case State.SCANNING_LANDING_PAD:
                 if self.global_goals: # check if the array is not empty
                     if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
@@ -394,15 +401,15 @@ class MyController():
                     print("ground reached")
                 else:    
                     self.height_desired -= 0.005
-        
+        """
+
         if t % 100 == 0:
             obstacle_map_drone = np.copy(obstacle_map)
             obstacle_map_drone[np.clip(c2d(self.current_pos.x), 0, map_nx)][np.clip(c2d(self.current_pos.y), 0, map_ny)] = 2 
+            inflated_map_drone = np.copy(inflated_map)
+            inflated_map_drone[np.clip(c2d(self.current_pos.x), 0, map_nx)][np.clip(c2d(self.current_pos.y), 0, map_ny)] = 2 
             plt.imsave("map.png", np.flip(obstacle_map_drone.astype(int), 1), vmin=-1, vmax=2, cmap='gray', origin='lower')
-            plt.imsave("inflated.png", np.flip(inflated_map.astype(int), 1), vmin=-1, vmax=2, cmap='gray', origin='lower')
-            
-            print(c2d(self.current_pos.x), c2d(self.current_pos.y), sensor_data['stabilizer.yaw'])
-            #print(inflated_map)
+            plt.imsave("inflated.png", np.flip(inflated_map_drone.astype(int), 1), vmin=-1, vmax=2, cmap='gray', origin='lower')
         t +=1
 
         control_command = [vx, vy, vyaw, self.height_desired]
