@@ -27,12 +27,14 @@ def get_neighbors(current, map):
     for dx, dy in directions:
         x = current[0] + dx
         y = current[1] + dy
-        if 0 <= x < len(map) and 0 <= y < len(map[0]) and map[x][y] != -1:
+        if 0 <= x < len(map) and 0 <= y < len(map[0]):
             
             if abs(map[x][y] - 1) < 0.1:
                 cost = 1
             if abs(map[x][y]) < 0.1:
                 cost = 2
+            if abs(map[x][y] + 1) < 0.1:
+                cost = 1000
     
             if dx != 0 and dy != 0:
                 cost *= math.sqrt(2)

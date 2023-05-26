@@ -59,7 +59,7 @@ Super parameters
 """
 gait = Gait.STRAIGHT # Gait of the robot
 mode = Mode.DUMB
-lateral_threshold = 0.2 # in meters
+lateral_threshold = 0.3 # in meters
 
 map_min = Coord(0.0, 0.0)
 map_max = Coord(5.0, 3.0)
