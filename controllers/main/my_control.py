@@ -169,13 +169,18 @@ def occupancy_map(current_pos, sensor_data):
 
 class MyController():
     def __init__(self):
-        self.start_pos    = Coord(-1.0, -1.0)  
+        self.start_pos    = Coord(-1.0, -1.0)
         self.current_pos  = Coord(0.0, 0.0)
         self.global_goals = []
         self.state = State.TAKE_OFF_1
         self.i = 0
+        self.landing_border = []
 
-        generate_preplanned_path(0.5, Coord(3.5, 0.0), Coord(5.0, 3.0), True)
+        #generate_preplanned_path(0.5, Coord(3.5, 0.0), Coord(5.0, 3.0), True)
+        generate_preplanned_path(0.5, Coord(0.5, 0.0), Coord(3.0, 2.0), True) # test
+        #generate_preplanned_path(0.25, Coord(1.75, 0.0), Coord(2.5, 1.5), True) #test
+        #plt.plot([p.x for p in preplanned_path], [p.y for p in preplanned_path])
+        #plt.show()
 
         self.flying_height = 0.4 # m
         self.height_desired = 0
@@ -192,6 +197,9 @@ class MyController():
         self.amp_oscillation = 30 # [deg]
         self.freq_oscillation = 1.0 # [Hz]
         self.count_pid = 0.0
+
+        self.prev_speed_x = 0.0
+        self.prev_speed_y = 0.0
 
         self.count = 0
         
@@ -362,32 +370,50 @@ class MyController():
                         self.global_goals = array2Coord(astar(obs_tmp, (c2d(self.current_pos.x), c2d(self.current_pos.y)), (c2d(tmp.x), c2d(tmp.y))))
                         
             case State.SCANNING_LANDING_PAD:
-                if self.global_goals: # check if the array is not empty
-                    if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
-                        vx, vy, vyaw, _ = self.move(sensor_data)
-                    else:
-                        self.global_goals.pop(0) #delete the first element
-                else:
-                    if mode == Mode.SILLY:
-                        tmp = find_most_interesting_cell()
-                    elif mode == Mode.DUMB:
-                        #while obstacle_map[int(preplanned_path[self.i].x / map_res), int(preplanned_path[self.i].y / map_res)] != -1:
-                        #    self.i += 1 # skip if cell blocked by obstacle
-                        if self.i < len(preplanned_path):
-                            tmp = preplanned_path[self.i]
-                            self.i += 1 #increment the counter for future step
+                if self.current_pos.x > 0.5 and sensor_data['range.zrange'] < 330:
+                    print('Land1')
+                    self.global_goals[0].x = self.current_pos.x + 0.3*self.prev_speed_x
+                    self.global_goals[0].y = self.current_pos.y + 0.3*self.prev_speed_y
+                    vx, vy, vyaw, _ = self.move(sensor_data)
+                    vyaw = 0
+                    self.speed = 0.1
+                    self.height_desired -= 0.002
+                    self.state = State.LAND_1   
+                else:   
+                    if self.global_goals: # check if the array is not empty
+                        if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
+                            vx, vy, vyaw, _ = self.move(sensor_data)
+                            self.prev_speed_x = vx
+                            self.prev_speed_y = vy
                         else:
-                            self.i = 0
-                        print(tmp, self.current_pos)
-                    obs_tmp = inflated_map.astype(int).tolist()   
-                    self.global_goals = array2Coord(astar(obs_tmp, (c2d(self.current_pos.x), c2d(self.current_pos.y)), (c2d(tmp.x), c2d(tmp.y))))
+                            self.global_goals.pop(0) #delete the first element
+                    else:
+                        if mode == Mode.SILLY:
+                            tmp = find_most_interesting_cell()
+                        elif mode == Mode.DUMB:
+                            #while obstacle_map[int(preplanned_path[self.i].x / map_res), int(preplanned_path[self.i].y / map_res)] != -1:
+                            #    self.i += 1 # skip if cell blocked by obstacle
+                            if self.i >= len(preplanned_path):
+                                # reset counter
+                                self.i = 0
+
+                            tmp = preplanned_path[self.i]
+                            self.i += 1 # increment counter
+                            print("current pos :", self.current_pos)    
+                        obs_tmp = inflated_map.astype(int).tolist()   
+                        print("before astar")
+                        self.global_goals = array2Coord(astar(obs_tmp, (c2d(self.current_pos.x), c2d(self.current_pos.y)), (c2d(tmp.x), c2d(tmp.y))))
+                        print("(astar done) next goal : ", self.global_goals[0])
 
             case State.LAND_1:
                 if sensor_data['range.zrange'] < 20: # True if has landed
+                    self.global_goals[0] = Coord(0.0, 0.0)
                     self.state = State.TAKE_OFF_2
                     print("ground reached")
                 else:    
-                    self.height_desired -= 0.005
+                    vx, vy, vyaw, _ = self.move(sensor_data)
+                    vyaw = 0
+                    self.height_desired -= 0.002
 
             case State.GO_TO_TAKE_OFF_PAD:
                 if self.global_goals: # check if the array is not empty
@@ -404,13 +430,24 @@ class MyController():
                     self.height_desired = -1 # stop the motors
                     print("ground reached")
                 else:    
-                    self.height_desired -= 0.005
+                    self.height_desired -= 0.002
         
         if t % 100 == 0:
             obstacle_map_drone = np.copy(obstacle_map)
             obstacle_map_drone[np.clip(c2d(self.current_pos.x), 0, map_nx)][np.clip(c2d(self.current_pos.y), 0, map_ny)] = 2 
             inflated_map_drone = np.copy(inflated_map)
             inflated_map_drone[np.clip(c2d(self.current_pos.x), 0, map_nx)][np.clip(c2d(self.current_pos.y), 0, map_ny)] = 2 
+            # astar_map = np.copy(inflated_map)
+        
+            #     astar_map +=  .plot(self.global_goals.x, self.global_goals.y , marker='*', color='red')
+        
+            
+            # path_x, path_y = zip(*global_goals)
+           
+
+            # plt.show()
+
+
             plt.imsave("map.png", np.flip(obstacle_map_drone.astype(int), 1), vmin=-1, vmax=2, cmap='gray', origin='lower')
             plt.imsave("inflated.png", np.flip(inflated_map_drone.astype(int), 1), vmin=-1, vmax=2, cmap='gray', origin='lower')
         t +=1
