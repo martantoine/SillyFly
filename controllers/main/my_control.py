@@ -177,7 +177,7 @@ class MyController():
         self.landing_border = []
 
         #generate_preplanned_path(0.5, Coord(3.5, 0.0), Coord(5.0, 3.0), True)
-        generate_preplanned_path(0.5, Coord(0.5, 0.0), Coord(3.0, 2.0), True) # test
+        generate_preplanned_path(0.2, Coord(1.0, 0.0), Coord(3.0, 2.0), True) # test
         #generate_preplanned_path(0.25, Coord(1.75, 0.0), Coord(2.5, 1.5), True) #test
         #plt.plot([p.x for p in preplanned_path], [p.y for p in preplanned_path])
         #plt.show()
@@ -202,6 +202,34 @@ class MyController():
         self.prev_speed_y = 0.0
 
         self.count = 0
+
+        #build table of 100 values
+        self.values_100 = []
+        self.values_10 = []
+        self.sum_100 = 0
+        self.sum_10 = 0
+
+    def moving_avergage(self, new_value):
+        #save new value
+        self.values_100.append(new_value)
+        self.values_10.append(new_value)
+
+        self.sum_100 += new_value
+        self.sum_10 += new_value
+
+        #compute avergage
+        average_100 = self.sum_100 / 100
+        average_10 = self.sum_10 / 10
+
+        #remove last value if list is full
+        if len(self.values_100) == 100:
+            self.sum_100 -= self.values_100[0]
+            self.values_100.pop(0)
+        if len(self.values_10) == 10:
+            self.sum_10 -= self.values_10[0]
+            self.values_10.pop(0)
+
+        return average_100, average_10
         
 
     def yaw_controller(self, yaw_command, sensor_data):
@@ -370,10 +398,12 @@ class MyController():
                         self.global_goals = array2Coord(astar(obs_tmp, (c2d(self.current_pos.x), c2d(self.current_pos.y)), (c2d(tmp.x), c2d(tmp.y))))
                         
             case State.SCANNING_LANDING_PAD:
-                if self.current_pos.x > 0.5 and sensor_data['range.zrange'] < 330:
+                average100, average10 = self.moving_avergage(sensor_data['range.zrange'])
+                #print("diff:", average100 - average10, "current x : " , self.current_pos.x)
+                if self.current_pos.x > 1.0 and (average100 - average10 > 100):
                     print('Land1')
-                    self.global_goals[0].x = self.current_pos.x + 0.3*self.prev_speed_x
-                    self.global_goals[0].y = self.current_pos.y + 0.3*self.prev_speed_y
+                    self.global_goals[0].x = self.current_pos.x + 0.1*self.prev_speed_x
+                    self.global_goals[0].y = self.current_pos.y + 0.1*self.prev_speed_y
                     vx, vy, vyaw, _ = self.move(sensor_data)
                     vyaw = 0
                     self.speed = 0.1
@@ -398,16 +428,13 @@ class MyController():
                                 self.i = 0
 
                             tmp = preplanned_path[self.i]
-                            self.i += 1 # increment counter
-                            print("current pos :", self.current_pos)    
+                            self.i += 1 # increment counter   
                         obs_tmp = inflated_map.astype(int).tolist()   
-                        print("before astar")
                         self.global_goals = array2Coord(astar(obs_tmp, (c2d(self.current_pos.x), c2d(self.current_pos.y)), (c2d(tmp.x), c2d(tmp.y))))
-                        print("(astar done) next goal : ", self.global_goals[0])
 
             case State.LAND_1:
-                if sensor_data['range.zrange'] < 20: # True if has landed
-                    self.global_goals[0] = Coord(0.0, 0.0)
+                if sensor_data['range.zrange'] < 5: # True if has landed
+                    self.global_goals = []
                     self.state = State.TAKE_OFF_2
                     print("ground reached")
                 else:    
@@ -415,20 +442,30 @@ class MyController():
                     vyaw = 0
                     self.height_desired -= 0.002
 
+            case State.TAKE_OFF_2:
+                if sensor_data['range.zrange'] < 290:
+                    print("take off 2")
+                    self.height_desired = self.flying_height
+                else:
+                    self.state = State.GO_TO_TAKE_OFF_PAD
+
             case State.GO_TO_TAKE_OFF_PAD:
                 if self.global_goals: # check if the array is not empty
+                    print("going to take off pad")
                     if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
                         vx, vy, vyaw, _ = self.move(sensor_data)
                     else:
                         self.global_goals.pop(0) #delete the first element
+                        print("pop")
                 else:
+                    print("planning to take off pad")
                     self.globals_path = astar(obstacle_map, [int(self.current_pos.x / map_res), int(self.current_pos.y / map_res)],
                                               [0, 0])
 
             case State.LAND_2:
                 if sensor_data['range.zrange'] < 20: # True if has landed
                     self.height_desired = -1 # stop the motors
-                    print("ground reached")
+                    print("END")
                 else:    
                     self.height_desired -= 0.002
         
@@ -437,17 +474,6 @@ class MyController():
             obstacle_map_drone[np.clip(c2d(self.current_pos.x), 0, map_nx)][np.clip(c2d(self.current_pos.y), 0, map_ny)] = 2 
             inflated_map_drone = np.copy(inflated_map)
             inflated_map_drone[np.clip(c2d(self.current_pos.x), 0, map_nx)][np.clip(c2d(self.current_pos.y), 0, map_ny)] = 2 
-            # astar_map = np.copy(inflated_map)
-        
-            #     astar_map +=  .plot(self.global_goals.x, self.global_goals.y , marker='*', color='red')
-        
-            
-            # path_x, path_y = zip(*global_goals)
-           
-
-            # plt.show()
-
-
             plt.imsave("map.png", np.flip(obstacle_map_drone.astype(int), 1), vmin=-1, vmax=2, cmap='gray', origin='lower')
             plt.imsave("inflated.png", np.flip(inflated_map_drone.astype(int), 1), vmin=-1, vmax=2, cmap='gray', origin='lower')
         t +=1
