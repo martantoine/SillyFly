@@ -59,7 +59,7 @@ Super parameters
 """
 gait = Gait.STRAIGHT # Gait of the robot
 mode = Mode.DUMB
-lateral_threshold = 0.3 # in meters
+lateral_threshold = 0.15 # in meters
 
 map_min = Coord(0.0, 0.0)
 map_max = Coord(5.0, 3.0)
@@ -108,16 +108,17 @@ def generate_preplanned_path(step_size, coord_min, coord_max, top, debug=False):
     
     for xi in range(n_x + 1):
         if top:
-            for yi in range(0, n_y + 1, 1):
+            for yi in range(0, n_y, 1):
                 preplanned_path.extend([coord_min + Coord(xi * step_size, yi * step_size)])
         else:
-            for yi in range(n_y, -1, -1):
+            for yi in range(n_y-1, -1, -1):
                 preplanned_path.extend([coord_min + Coord(xi * step_size, yi * step_size)])
         top = not top
     
     if debug:
+        print(map_nx, map_ny)
         for point in preplanned_path:
-            print(point)
+            print(c2d(point.x), c2d(point.y))
 
 def c2d(continuous):
     return int(np.clip(continuous / map_res, 0, np.inf))
@@ -175,9 +176,13 @@ class MyController():
         self.state = State.TAKE_OFF_1
         self.i = 0
         self.landing_border = []
+        self.zA_hist = np.zeros(100)
+        self.zA_i = 0
+        self.zB_hist = np.zeros(5)
+        self.zB_i = 0
 
-        #generate_preplanned_path(0.5, Coord(3.5, 0.0), Coord(5.0, 3.0), True)
-        generate_preplanned_path(0.5, Coord(0.5, 0.0), Coord(3.0, 2.0), True) # test
+        generate_preplanned_path(0.5, Coord(3.5, 0.0), Coord(5.0, 3.0), True)
+        #generate_preplanned_path(0.2, Coord(0.0, 0.0), Coord(1.5, 3.0), True, debug=False) # test
         #generate_preplanned_path(0.25, Coord(1.75, 0.0), Coord(2.5, 1.5), True) #test
         #plt.plot([p.x for p in preplanned_path], [p.y for p in preplanned_path])
         #plt.show()
@@ -242,7 +247,7 @@ class MyController():
             yaw_rate = -self.max_yaw_rate
 
         if plot_PID:
-            print("yaw error : ", yaw_error, " | yaw rate : ", yaw_rate, " | yaw prop : ", yaw_prop, " | yaw int : ", yaw_int)
+            #print("yaw error : ", yaw_error, " | yaw rate : ", yaw_rate, " | yaw prop : ", yaw_prop, " | yaw int : ", yaw_int)
             # save error, prop, int, yaw_rate in table to plot at the end
             self.yaw_error_table.append(yaw_error)
             self.yaw_prop_table.append(yaw_prop)
@@ -314,10 +319,18 @@ class MyController():
             return control_command
         else:
             self.current_pos = Coord(sensor_data['stateEstimate.x'], sensor_data['stateEstimate.y']) - self.start_pos
-
+            self.current_pos = Coord(sensor_data['stateEstimate.x'], sensor_data['stateEstimate.y'])
+        self.zA_hist = sensor_data['range.zrange']
+        self.zA_hist += 1
+        if self.zA_hist == 100:
+            self.zA_hist = 0
+        
+        self.zB_hist = sensor_data['range.zrange']
+        self.zB_hist += 1
+        if self.zB_hist == 5:
+            self.zB_hist = 0
 
         obstacle_map = occupancy_map(self.current_pos, sensor_data)
-        mean_mat = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
         obstacle_map_masked = np.copy(obstacle_map)
         for x in range(len(obstacle_map_masked)):
             for y in range(len(obstacle_map_masked[0])):
@@ -325,8 +338,11 @@ class MyController():
                     obstacle_map_masked[x][y] = 0
                 else:
                     obstacle_map_masked[x][y] = 1
-        inflated_map = cv2.dilate(obstacle_map_masked, mean_mat)
-        inflated_map = np.clip(-2 * inflated_map + obstacle_map, -1, 1)
+        inflated_map7 = cv2.dilate(obstacle_map_masked, cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7)))
+        inflated_map5 = cv2.dilate(obstacle_map_masked, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
+        inflated_map3 = cv2.dilate(obstacle_map_masked, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
+        inflated_map = obstacle_map_masked + inflated_map3 + inflated_map5 + inflated_map7
+        inflated_map = np.clip(-2 * inflated_map + obstacle_map, -8, 1)
                         
         # if detects Q key, land and stop the program, must be the first condition in the function
         if keyboard.is_pressed('space'):
@@ -344,13 +360,15 @@ class MyController():
                     print("EMERGENCY END")
 
             case State.TAKE_OFF_1:
-                if sensor_data['range.zrange'] < 290:
+                if sensor_data['range.zrange'] < 390:
                     self.height_desired = self.flying_height
                 else:
-                    self.state = State.SCANNING_LANDING_PAD
+                    print("take off 1 completed, current pos: ", self.current_pos, "start pos: ", self.start_pos)
+                    self.state = State.GO_TO_LANDING_REGION
 
             case State.GO_TO_LANDING_REGION:
                 if self.global_goals: # check if the array is not empty
+
                     if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
                         vx, vy, vyaw, _ = self.move(sensor_data)
                     else:
@@ -361,24 +379,23 @@ class MyController():
                         #print("put in emergy by 349")
                         self.state = State.SCANNING_LANDING_PAD
                     else:
+                        print("1", self.current_pos, c2d(self.current_pos.x), c2d(self.current_pos.y))
                         tmp = find_x_positive_free_cell(self.current_pos, inflated_map)
+                        print("2", tmp, c2d(tmp.x), c2d(tmp.y))
                         #print("current:", self.current_pos, c2d(self.current_pos.x), c2d(self.current_pos.y), sensor_data['stabilizer.yaw'])
                         #print("tmp:", c2d(tmp.x), c2d(tmp.y), tmp)
                         #tmp = Coord(3.5, 1.0)
                         
                         obs_tmp = inflated_map.astype(int).tolist()    
+                        print("2.5")
                         self.global_goals = array2Coord(astar(obs_tmp, (c2d(self.current_pos.x), c2d(self.current_pos.y)), (c2d(tmp.x), c2d(tmp.y))))
+                        print("3")
                         
             case State.SCANNING_LANDING_PAD:
-                if self.current_pos.x > 0.5 and sensor_data['range.zrange'] < 330:
-                    print('Land1')
-                    self.global_goals[0].x = self.current_pos.x + 0.3*self.prev_speed_x
-                    self.global_goals[0].y = self.current_pos.y + 0.3*self.prev_speed_y
-                    vx, vy, vyaw, _ = self.move(sensor_data)
-                    vyaw = 0
-                    self.speed = 0.1
-                    self.height_desired -= 0.002
-                    self.state = State.LAND_1   
+                z_big_mean = np.mean(self.zA_hist)
+                z_small_mean = np.mean(self.zB_hist)
+                if z_big_mean > z_small_mean + 30:
+                    self.state = State.LAND_1
                 else:   
                     if self.global_goals: # check if the array is not empty
                         if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
@@ -391,65 +408,70 @@ class MyController():
                         if mode == Mode.SILLY:
                             tmp = find_most_interesting_cell()
                         elif mode == Mode.DUMB:
-                            #while obstacle_map[int(preplanned_path[self.i].x / map_res), int(preplanned_path[self.i].y / map_res)] != -1:
-                            #    self.i += 1 # skip if cell blocked by obstacle
+                            while inflated_map[c2d(preplanned_path[self.i].x), c2d(preplanned_path[self.i].y)] != 1:
+                                self.i += 1 # skip if cell blocked by obstacle
+                                print("skipped preplanned point cause blocked by obstacle")
                             if self.i >= len(preplanned_path):
                                 # reset counter
                                 self.i = 0
 
                             tmp = preplanned_path[self.i]
                             self.i += 1 # increment counter
-                            print("current pos :", self.current_pos)    
                         obs_tmp = inflated_map.astype(int).tolist()   
-                        print("before astar")
+                        #print("current pos: ", self.current_pos)
+                        #print("big goal: ", tmp)
                         self.global_goals = array2Coord(astar(obs_tmp, (c2d(self.current_pos.x), c2d(self.current_pos.y)), (c2d(tmp.x), c2d(tmp.y))))
-                        print("(astar done) next goal : ", self.global_goals[0])
+                        #for ti in self.global_goals:
+                        #    print("small goal: ", ti)
 
             case State.LAND_1:
                 if sensor_data['range.zrange'] < 20: # True if has landed
-                    self.global_goals[0] = Coord(0.0, 0.0)
+                    self.global_goals = []
                     self.state = State.TAKE_OFF_2
-                    print("ground reached")
+                    print("landing 1 completed")
                 else:    
-                    vx, vy, vyaw, _ = self.move(sensor_data)
-                    vyaw = 0
                     self.height_desired -= 0.002
 
-            case State.GO_TO_TAKE_OFF_PAD:
-                if self.global_goals: # check if the array is not empty
-                    if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
-                        vx, vy, vyaw, _ = self.move(sensor_data)
-                    else:
-                        self.global_goals.pop(0) #delete the first element
+            case State.TAKE_OFF_2:
+                if sensor_data['range.zrange'] < 390:
+                    self.height_desired = self.flying_height
                 else:
-                    self.globals_path = astar(obstacle_map, [int(self.current_pos.x / map_res), int(self.current_pos.y / map_res)],
-                                              [0, 0])
+                    self.state = State.GO_TO_TAKE_OFF_PAD
+                    print("take off 2 completed")
+                    
+            case State.GO_TO_TAKE_OFF_PAD:
+                if Coord.dist(self.current_pos, Coord(0.0, 0.0)) > lateral_threshold:
+                    if self.global_goals: # check if the array is not empty
+                        if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
+                            vx, vy, vyaw, _ = self.move(sensor_data)
+                        else:
+                            self.global_goals.pop(0) #delete the first element
+                    else:
+                        obs_tmp = inflated_map.astype(int).tolist()   
+                        self.globals_path = astar(obs_tmp, [c2d(self.current_pos.x), c2d(self.current_pos.y)],
+                                                [0, 0])
+                else:
+                    self.state = State.LAND_2
 
             case State.LAND_2:
                 if sensor_data['range.zrange'] < 20: # True if has landed
                     self.height_desired = -1 # stop the motors
-                    print("ground reached")
+                    print("landing 2 completed")
                 else:    
                     self.height_desired -= 0.002
         
         if t % 100 == 0:
             obstacle_map_drone = np.copy(obstacle_map)
-            obstacle_map_drone[np.clip(c2d(self.current_pos.x), 0, map_nx)][np.clip(c2d(self.current_pos.y), 0, map_ny)] = 2 
+            obstacle_map_drone[np.clip(c2d(self.current_pos.x), 0, map_nx-1)][np.clip(c2d(self.current_pos.y), 0, map_ny-1)] = 2 
             inflated_map_drone = np.copy(inflated_map)
-            inflated_map_drone[np.clip(c2d(self.current_pos.x), 0, map_nx)][np.clip(c2d(self.current_pos.y), 0, map_ny)] = 2 
-            # astar_map = np.copy(inflated_map)
-        
-            #     astar_map +=  .plot(self.global_goals.x, self.global_goals.y , marker='*', color='red')
-        
-            
-            # path_x, path_y = zip(*global_goals)
-           
-
-            # plt.show()
-
-
+            inflated_map_drone[np.clip(c2d(self.current_pos.x), 0, map_nx-1)][np.clip(c2d(self.current_pos.y), 0, map_ny-1)] = 2 
+            astar_map_drone = np.copy(obstacle_map)
+            astar_map_drone[np.clip(c2d(self.current_pos.x), 0, map_nx-1)][np.clip(c2d(self.current_pos.y), 0, map_ny-1)] = 3
+            for small_goal in self.global_goals:
+                astar_map_drone[np.clip(c2d(small_goal.x), 0, map_nx-1)][np.clip(c2d(small_goal.y), 0, map_ny-1)] = 2
             plt.imsave("map.png", np.flip(obstacle_map_drone.astype(int), 1), vmin=-1, vmax=2, cmap='gray', origin='lower')
-            plt.imsave("inflated.png", np.flip(inflated_map_drone.astype(int), 1), vmin=-1, vmax=2, cmap='gray', origin='lower')
+            plt.imsave("inflated.png", np.flip(inflated_map_drone.astype(int), 1), vmin=-8, vmax=2, cmap='gray', origin='lower')
+            plt.imsave("astar.png", np.flip(astar_map_drone.astype(int), 1), vmin=-1, vmax=3, cmap='gray', origin='lower')
         t +=1
 
         control_command = [vx, vy, vyaw, self.height_desired]

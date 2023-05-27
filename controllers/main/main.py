@@ -122,10 +122,18 @@ if __name__ == '__main__':
 
     cflib.crtp.init_drivers()
 
+
     le = Logging()
 
     # Initialize the drone
     drone = le._cf
+
+    drone.param.set_value('kalman.resetEstimation', '1')
+    time.sleep(0.1)
+    drone.param.set_value('kalman.resetEstimation', '0')
+    time.sleep(2)
+
+
     my_controller = MyController()
 
     control_commands = [0, 0, 0, 0]

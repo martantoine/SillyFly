@@ -31,10 +31,19 @@ def get_neighbors(current, map):
             
             if abs(map[x][y] - 1) < 0.1:
                 cost = 1
-            if abs(map[x][y]) < 0.1:
+            elif map[x][y] == 0:
                 cost = 2
-            if abs(map[x][y] + 1) < 0.1:
+            elif map[x][y] == -1 or map[x][y] == -2:
+                cost = 100
+            elif map[x][y] == -3 or map[x][y] == -4:
+                cost = 200
+            elif map[x][y] == -5 or map[x][y] == -6:
+                cost = 300
+            elif map[x][y] == -7 or map[x][y] == -8:
+                cost = 400
+            else:
                 cost = 1000
+                print("shit happened")
     
             if dx != 0 and dy != 0:
                 cost *= math.sqrt(2)
