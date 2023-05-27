@@ -214,6 +214,34 @@ class MyController():
         self.prev_speed_y = 0.0
 
         self.count = 0
+
+        #build table of 100 values
+        self.values_100 = []
+        self.values_10 = []
+        self.sum_100 = 0
+        self.sum_10 = 0
+
+    def moving_avergage(self, new_value):
+        #save new value
+        self.values_100.append(new_value)
+        self.values_10.append(new_value)
+
+        self.sum_100 += new_value
+        self.sum_10 += new_value
+
+        #compute avergage
+        average_100 = self.sum_100 / 100
+        average_10 = self.sum_10 / 10
+
+        #remove last value if list is full
+        if len(self.values_100) == 100:
+            self.sum_100 -= self.values_100[0]
+            self.values_100.pop(0)
+        if len(self.values_10) == 10:
+            self.sum_10 -= self.values_10[0]
+            self.values_10.pop(0)
+
+        return average_100, average_10
         
 
     def yaw_controller(self, yaw_command, sensor_data):
