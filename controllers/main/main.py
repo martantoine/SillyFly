@@ -22,7 +22,7 @@ enable_random_environment = True
 # Set seed to replicate the random environment
 # random.seed(3000)
 
-class Logging:
+class Logging:        
     """
     Simple logging example class that logs the Stabilizer from a supplied
     link uri and disconnects after 5s.
