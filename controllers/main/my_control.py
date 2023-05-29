@@ -25,7 +25,7 @@ height : [m]
 
 counter : 40 =~ 1s
 """
-
+import time
 import math
 import numpy as np
 from enum import Enum
@@ -183,10 +183,12 @@ class MyController():
         self.state = State.TAKE_OFF_1
         self.i = 0
         self.landing_border = []
-        self.zA_hist = np.zeros(100)
+        self.zA_hist = np.zeros(50)
         self.zA_i = 0
         self.zB_hist = np.zeros(2)
         self.zB_i = 0
+        self.edge_counter = 0
+        self.edge = [Coord(0.0, 0.0), Coord(0.0, 0.0), Coord(0.0, 0.0), Coord(0.0, 0.0), Coord(0.0, 0.0), Coord(0.0, 0.0)]
 
         generate_preplanned_path(0.5, Coord(1.0, 0.0), Coord(2.5, 1.5), True, debug=True)
         #generate_preplanned_path(0.2, Coord(0.0, 0.0), Coord(1.5, 3.0), True, debug=False) # test
@@ -339,6 +341,7 @@ class MyController():
         Emergency stop : hold space to land slowly, release to stop the motors
         """
         global mode
+        global gait
         global lateral_threshold
         global preplanned_path
         global obstacle_map
@@ -358,7 +361,7 @@ class MyController():
         
         self.zA_hist[self.zA_i] = sensor_data['range.zrange']
         self.zA_i += 1
-        if self.zA_i == 100:
+        if self.zA_i == 50:
             self.zA_i = 0
         
         self.zB_hist = sensor_data['range.zrange']
@@ -380,7 +383,12 @@ class MyController():
         inflated_mapD = cv2.dilate(obstacle_map_masked, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
         inflated_map = obstacle_map_masked + inflated_mapA + inflated_mapB + inflated_mapC + inflated_mapD
         inflated_map = np.clip(-2 * inflated_map + obstacle_map, -10, 1)
-                        
+        
+
+        z_big_mean = np.mean(self.zA_hist)
+        z_small_mean = np.mean(self.zB_hist)
+        diff = abs(z_big_mean - z_small_mean)
+        
         # if detects Q key, land and stop the program, must be the first condition in the function
         if keyboard.is_pressed('space'):
             self.state = State.EMERGENCY        
@@ -401,7 +409,7 @@ class MyController():
                     self.height_desired = self.flying_height
                 else:
                     print("take off 1 completed, current pos: ", self.current_pos, "start pos: ", self.start_pos)
-                    self.state = State.GO_TO_LANDING_REGION
+                    self.state = State.LAND_1
 
             case State.GO_TO_LANDING_REGION:
                 if self.global_goals: # check if the array is not empty
@@ -429,12 +437,9 @@ class MyController():
                         print("3")
 
             case State.SCANNING_LANDING_PAD:
-                z_big_mean = np.mean(self.zA_hist)
-                z_small_mean = np.mean(self.zB_hist)
-                diff = z_big_mean - z_small_mean
-                print("diff: ", diff)
-                if diff > 70:
+                if diff > 60:
                     self.state = State.LAND_1
+                    self.global_goals = []
                     print("go to landing 1")
                 else:   
                     if self.global_goals: # check if the array is not empty
@@ -469,12 +474,42 @@ class MyController():
                         #    print("small goal: ", ti)
 
             case State.LAND_1:
-                if sensor_data['range.zrange'] < 5: # True if has landed
+                lateral_threshold = 0.05 #the finer the better
+                gait = Gait.STATIC
+                self.speed = 0.1
+                if not self.global_goals:
+                    if self.edge_counter == 0:
+                        self.global_goals = [Coord(-0.3, 0.0) + self.current_pos]
+                    elif self.edge_counter == 1:
+                        self.global_goals = [Coord(0.6, 0.0) + self.current_pos]
+                    elif self.edge_counter == 2:
+                        self.global_goals = [Coord(-0.3, 0.0) + self.current_pos]
+                    elif self.edge_counter == 3:
+                        self.global_goals = [Coord(0.0, -0.3) + self.current_pos]
+                    elif self.edge_counter == 4:
+                        self.global_goals = [Coord(0.0, 0.6) + self.current_pos]
+                    elif self.edge_counter == 5:
+                        self.global_goals = [Coord((self.edge[0].x + self.edge[1].x) / 2.0, (self.edge[3].y + self.edge[4].y) / 2.0)]
+                else:
+                    if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold: 
+                        vx, vy, vyaw, _ = self.move(sensor_data)
+                        if diff > 70:
+                            self.edge[self.edge_counter] = self.current_pos
+                            print("step detected", self.edge_counter)
+                    else:
+                        if self.edge_counter == 5:
+                            if sensor_data['range.zrange'] < 5: # True if has landed
+                                self.state = State.TAKE_OFF_2
+                                self.global_goals = []
+                                time.sleep(2)
 
-                    self.state = State.TAKE_OFF_2
-                    print("landing 1 completed")
-                else:    
-                    self.height_desired -= 0.002
+                                print("landing 1 completed")
+                            else:    
+                                self.height_desired -= 0.002
+                        else:
+                            self.global_goals = []
+                            self.edge_counter += 1
+
 
             case State.TAKE_OFF_2:
                 if sensor_data['range.zrange'] < 390:
@@ -495,7 +530,7 @@ class MyController():
                         obs_tmp = inflated_map.astype(int).tolist()   
                         print("2.5, current:", self.current_pos, c2d(self.current_pos.x), c2d(self.current_pos.y), sensor_data['stabilizer.yaw'])
                         self.global_goals = array2Coord(astar(obs_tmp, (c2dX(self.current_pos.x), c2dY(self.current_pos.y)),
-                                                (c2dX(1.0), c2dY(1.0))))
+                                                (c2dX(0.0), c2dY(0.0))))
                         for ti in self.global_goals:
                             print("small goal: ", ti)
                 else:

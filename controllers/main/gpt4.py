@@ -12,6 +12,9 @@ class Node:
         self.heuristic = heuristic
         self.priority = cost + heuristic
 
+    def __eq__(self, other):
+        return self.position == other.position
+        
     def __lt__(self, other):
         return self.priority < other.priority or (self.priority == other.priority and self.cost > other.cost)
 
@@ -94,8 +97,10 @@ def astar(map, start, goal):
                 heuristic=neighbor_heuristic
             )
 
-            if neighbor_node in open_list:
-                existing_node = open_list[open_list.index(neighbor_node)]
+            if any(node.position == neighbor_node.position for node in open_list):
+            #if neighbor_node in open_list:
+                existing_node = next(node for node in open_list if node.position == neighbor_node.position)
+                #existing_node = open_list[open_list.index(neighbor_node)]
                 if existing_node.cost > neighbor_cost:
                     existing_node.cost = neighbor_cost
                     existing_node.parent = current_node
@@ -103,7 +108,6 @@ def astar(map, start, goal):
                     heapq.heapify(open_list)
             else:
                 heapq.heappush(open_list, neighbor_node)
-
     return None
 
 def display_map(map, path):
