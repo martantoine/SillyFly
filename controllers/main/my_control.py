@@ -62,7 +62,7 @@ mode = Mode.DUMB
 lateral_threshold = 0.15 # in meters
 
 map_min = Coord(0.0, 0.0)
-map_max = Coord(2.5, 1.5)
+map_max = Coord(5.0, 3.0)
 map_res = 0.1
 map_nx = int((map_max.x - map_min.x) / map_res)
 map_ny = int((map_max.y - map_min.y) / map_res)
@@ -183,18 +183,14 @@ class MyController():
         self.state = State.TAKE_OFF_1
         self.i = 0
         self.landing_border = []
-        self.zA_hist = np.zeros(25)
+        self.zA_hist = np.zeros(50)
         self.zA_i = 0
         self.zB_hist = np.zeros(2)
         self.zB_i = 0
         self.edge_counter = 0
-        self.edge = [Coord(0.0, 0.0), Coord(0.0, 0.0), Coord(0.0, 0.0), Coord(0.0, 0.0), Coord(0.0, 0.0), Coord(0.0, 0.0), Coord(0.0, 0.0), Coord(0.0, 0.0)]
+        self.edge = [Coord(0.0, 0.0), Coord(0.0, 0.0), Coord(0.0, 0.0), Coord(0.0, 0.0), Coord(0.0, 0.0), Coord(0.0, 0.0), Coord(0.0, 0.0), Coord(0.0, 0.0), Coord(0.0, 0.0)]
         self.pos_landing = 0
-        generate_preplanned_path(0.5, Coord(1.0, 0.0), Coord(2.5, 1.5), True, debug=True)
-        #generate_preplanned_path(0.2, Coord(0.0, 0.0), Coord(1.5, 3.0), True, debug=False) # test
-        #generate_preplanned_path(0.25, Coord(1.75, 0.0), Coord(2.5, 1.5), True) #test
-        #plt.plot([p.x for p in preplanned_path], [p.y for p in preplanned_path])
-        #plt.show()
+        generate_preplanned_path(0.25, Coord(3.5, 0.0), map_max, True, debug=False)
 
         self.flying_height = 0.4 # m
         self.height_desired = 0
@@ -353,7 +349,7 @@ class MyController():
         vyaw = 0.0
         
         if self.start_pos.x == -1.0:
-            self.start_pos = Coord(sensor_data['stateEstimate.x'], sensor_data['stateEstimate.y'])
+            self.start_pos = Coord(sensor_data['stateEstimate.x'], sensor_data['stateEstimate.y']) - Coord(0.0, 0.0)
             control_command = [vx, vy, vyaw, self.height_desired]
             return control_command
         else:
@@ -362,7 +358,7 @@ class MyController():
         
         self.zA_hist[self.zA_i] = sensor_data['range.zrange']
         self.zA_i += 1
-        if self.zA_i == 25:
+        if self.zA_i == 50:
             self.zA_i = 0
         
         self.zB_hist = sensor_data['range.zrange']
@@ -414,7 +410,7 @@ class MyController():
                 else:
                     print("take off 1 completed, current pos: ", self.current_pos, "start pos: ", self.start_pos)
                     self.global_goals = []
-                    self.state = State.LAND_1
+                    self.state = State.GO_TO_LANDING_REGION
 
             case State.GO_TO_LANDING_REGION:
                 if self.global_goals: # check if the array is not empty
@@ -422,24 +418,14 @@ class MyController():
                     if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
                         vx, vy, vyaw, _ = self.move(sensor_data)
                     else:
-                        #print("mini tmp:", self.global_goals[0])
                         self.global_goals.pop(0) #delete the first element
                 else:
                     if self.current_pos.x > 1.0:
-                        #print("put in emergy by 349")
                         self.state = State.SCANNING_LANDING_PAD
                     else:
-                        print("1", self.current_pos, c2d(self.current_pos.x), c2d(self.current_pos.y))
                         tmp = find_x_positive_free_cell(self.current_pos, inflated_map)
-                        print("2", tmp, c2d(tmp.x), c2d(tmp.y))
-                        #print("current:", self.current_pos, c2d(self.current_pos.x), c2d(self.current_pos.y), sensor_data['stabilizer.yaw'])
-                        #print("tmp:", c2d(tmp.x), c2d(tmp.y), tmp)
-                        #tmp = Coord(3.5, 1.0)
-                        
-                        obs_tmp = inflated_map.astype(int).tolist()    
-                        print("2.5")
+                        obs_tmp = inflated_map.astype(int).tolist()  
                         self.global_goals = array2Coord(astar(obs_tmp, (c2dX(self.current_pos.x), c2dY(self.current_pos.y)), (c2dX(tmp.x), c2dY(tmp.y))))
-                        print("3")
 
             case State.SCANNING_LANDING_PAD:
                 if diff > 60:
@@ -456,27 +442,19 @@ class MyController():
                         if mode == Mode.SILLY:
                             tmp = find_most_interesting_cell()
                         elif mode == Mode.DUMB:
-                            #print("1", self.current_pos, c2d(self.current_pos.x), c2d(self.current_pos.y))
                             if self.i >= len(preplanned_path):
                                 self.i = 0
-                            while inflated_map[c2dX(preplanned_path[self.i].x), c2dY(preplanned_path[self.i].y)] != 1:
+                            while inflated_map[c2dX(preplanned_path[self.i].x), c2dY(preplanned_path[self.i].y)] < -2:
                                 self.i += 1 # skip if cell blocked by obstacle
                                 if self.i >= len(preplanned_path):
                                     self.i = 0
                                 print("skipped preplanned point cause blocked by obstacle")
 
                             tmp = preplanned_path[self.i]
-                            #print("2", tmp, c2d(tmp.x), c2d(tmp.y))
                         
                             self.i += 1 # increment counter
-                        obs_tmp = inflated_map.astype(int).tolist()   
-                        #print("current pos: ", self.current_pos)
-                        #print("big goal: ", tmp)
-                        #print("2.5")
+                        obs_tmp = inflated_map.astype(int).tolist()
                         self.global_goals = array2Coord(astar(obs_tmp, (c2dX(self.current_pos.x), c2dY(self.current_pos.y)), (c2dX(tmp.x), c2dY(tmp.y))))
-                        #print("3")
-                        #for ti in self.global_goals:
-                        #    print("small goal: ", ti)
 
             case State.LAND_1:
                 gait = Gait.STATIC
@@ -498,31 +476,31 @@ class MyController():
                     elif self.edge_counter == 6:
                         self.global_goals = [Coord(0.0, 0.4) + self.pos_landing]
                     elif self.edge_counter == 7:
+                        self.global_goals = [Coord(0.0, 0.0) + self.pos_landing]
+                    elif self.edge_counter == 8:
                         self.global_goals = [Coord((self.edge[0].x + self.edge[1].x + self.edge[2].x + self.edge[3].x) / 4.0, (self.edge[4].y + self.edge[5].y + self.edge[6].y + self.edge[7].y) / 4.0)]
                 else:
                     if Coord.dist(self.current_pos, self.global_goals[0]) > 0.05: 
                         vx, vy, vyaw, _ = self.move(sensor_data)
-                        #if diff > 50 and self.edge_counter in [0, 2, 4, 6]:
                         if abs(self.previous_z - self.current_z) > 15:
                             self.edge[self.edge_counter] = self.current_pos
                             print("state: ", self.edge_counter, "current pos: ", self.current_pos, "goal: ", self.global_goals[0])
                     else:
-                        if self.edge_counter == 7:
-                            if sensor_data['range.zrange'] < 5: # True if has landed
+                        if self.edge_counter == 8:
+                            if sensor_data['range.zrange'] < 20:
                                 self.state = State.TAKE_OFF_2
                                 self.global_goals = []
-
+                                self.height_desired = -2
                                 print("landing 1 completed")
                             else:    
                                 self.height_desired -= 0.002
                         else:
                             self.global_goals = []
                             self.edge_counter += 1
-
-
+                    
             case State.TAKE_OFF_2:
                 if sensor_data['range.zrange'] < 390:
-                    self.height_desired = -1
+                    self.height_desired = self.flying_height
                 else:
                     self.state = State.GO_TO_TAKE_OFF_PAD
                     self.global_goals = []
@@ -537,31 +515,67 @@ class MyController():
                             self.global_goals.pop(0) #delete the first element
                     else:
                         obs_tmp = inflated_map.astype(int).tolist()   
-                        print("2.5, current:", self.current_pos, c2d(self.current_pos.x), c2d(self.current_pos.y), sensor_data['stabilizer.yaw'])
                         self.global_goals = array2Coord(astar(obs_tmp, (c2dX(self.current_pos.x), c2dY(self.current_pos.y)),
                                                 (c2dX(0.0), c2dY(0.0))))
-                        for ti in self.global_goals:
-                            print("small goal: ", ti)
                 else:
                     self.state = State.LAND_2
 
             case State.LAND_2:
-                if sensor_data['range.zrange'] < 20: # True if has landed
-                    self.height_desired = -1 # stop the motors
-                    print("landing 2 completed")
-                else:    
-                    self.height_desired -= 0.002
+                gait = Gait.STATIC
+                if not self.global_goals:
+                    if self.edge_counter == 0:
+                        self.pos_landing = self.current_pos
+                        self.global_goals = [Coord(-0.4, 0.0) + self.pos_landing]
+                    elif self.edge_counter == 1:
+                        self.global_goals = [Coord(0.0, 0.0) + self.pos_landing]
+                    elif self.edge_counter == 2:
+                        self.global_goals = [Coord(0.4, 0.0) + self.pos_landing]
+                    elif self.edge_counter == 3:
+                        self.global_goals = [Coord(0.0, 0.0) + self.pos_landing]
+                    elif self.edge_counter == 4:
+                        self.global_goals = [Coord(0.0, -0.4) + self.pos_landing]
+                    elif self.edge_counter == 5:
+                        self.global_goals = [Coord(0.0, 0.0) + self.pos_landing]
+                    elif self.edge_counter == 6:
+                        self.global_goals = [Coord(0.0, 0.4) + self.pos_landing]
+                    elif self.edge_counter == 7:
+                        self.global_goals = [Coord(0.0, 0.0) + self.pos_landing]
+                    elif self.edge_counter == 8:
+                        self.global_goals = [Coord((self.edge[0].x + self.edge[1].x + self.edge[2].x + self.edge[3].x) / 4.0, (self.edge[4].y + self.edge[5].y + self.edge[6].y + self.edge[7].y) / 4.0)]
+    
+                else:
+                    if Coord.dist(self.current_pos, self.global_goals[0]) > 0.05: 
+                        vx, vy, vyaw, _ = self.move(sensor_data)
+                        if abs(self.previous_z - self.current_z) > 15:
+                            self.edge[self.edge_counter] = self.current_pos
+                            print("state: ", self.edge_counter, "current pos: ", self.current_pos, "goal: ", self.global_goals[0])
+                    else:
+                        if self.edge_counter == 8:
+                            if sensor_data['range.zrange'] < 20:
+                                self.global_goals = []
+                                self.height_desired = -1
+                                print("landing 2 completed")
+                            else:    
+                                self.height_desired -= 0.002
+                        else:
+                            self.global_goals = []
+                            self.edge_counter += 1
         
         if t % 100 == 0:
             obstacle_map_drone = np.copy(obstacle_map)
-            obstacle_map_drone[np.clip(c2d(self.current_pos.x), 0, map_nx-1)][np.clip(c2d(self.current_pos.y), 0, map_ny-1)] = 2 
             inflated_map_drone = np.copy(inflated_map)
             inflated_map_drone[np.clip(c2d(self.current_pos.x), 0, map_nx-1)][np.clip(c2d(self.current_pos.y), 0, map_ny-1)] = 2 
             astar_map_drone = np.copy(obstacle_map)
             astar_map_drone[np.clip(c2d(self.current_pos.x), 0, map_nx-1)][np.clip(c2d(self.current_pos.y), 0, map_ny-1)] = 3
             for small_goal in self.global_goals:
                 astar_map_drone[np.clip(c2d(small_goal.x), 0, map_nx-1)][np.clip(c2d(small_goal.y), 0, map_ny-1)] = 2
-            plt.imsave("map.png", np.flip(obstacle_map_drone.astype(int), 1), vmin=-1, vmax=2, cmap='gray', origin='lower')
+            i = 0
+            for yi in range(map_ny):
+                obstacle_map_drone[c2d(3.5)][yi] = 2
+            for small_goal in preplanned_path:
+                obstacle_map_drone[np.clip(c2d(small_goal.x), 0, map_nx-1)][np.clip(c2d(small_goal.y), 0, map_ny-1)] = 1 + i
+                i *= 2
+            plt.imsave("map.png", np.flip(obstacle_map_drone.astype(int), 1), vmin=-1, vmax=3, cmap='gray', origin='lower')
             plt.imsave("inflated.png", np.flip(inflated_map_drone.astype(int), 1), vmin=-10, vmax=2, cmap='gray', origin='lower')
             plt.imsave("inflated_raw.png", np.flip(inflated_map.astype(int), 1), vmin=-10, vmax=1, cmap='gray', origin='lower')
             plt.imsave("astar.png", np.flip(astar_map_drone.astype(int), 1), vmin=-1, vmax=3, cmap='gray', origin='lower')

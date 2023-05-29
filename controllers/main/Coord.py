@@ -15,6 +15,9 @@ class Coord:
     def __sub__(self, other):
         return Coord(self.x - other.x, self.y - other.y)
     
+    def __div__(self, other):
+        return Coord(self.x / other, self.y / other)
+
     def dist(self, other):
         dx = self.x - other.x
         dy = self.y - other.y

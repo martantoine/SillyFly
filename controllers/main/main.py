@@ -162,15 +162,15 @@ if __name__ == '__main__':
             # drone.step(control_commands, sensor_data)
 
             # Send control commands to the drone
-            if control_commands[3] != -1:
-                control_commands = my_controller.step_control(sensor_data)
-                #drone.commander.send_stop_setpoint()
-                drone.commander.send_hover_setpoint(control_commands[0], control_commands[1], control_commands[2], control_commands[3])
-            else: #stop the motors and exit the program
-                control_commands = my_controller.step_control(sensor_data)
+            control_commands = my_controller.step_control(sensor_data)
+            if control_commands[3] == -2:
                 drone.commander.send_stop_setpoint()
-                #break
-                
+                time.sleep(1)
+            elif control_commands[3] == -1:
+                drone.commander.send_stop_setpoint()
+                break
+            else:
+                drone.commander.send_hover_setpoint(control_commands[0], control_commands[1], control_commands[2], control_commands[3])    
 
         time.sleep(0.01)
 
