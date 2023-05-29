@@ -203,6 +203,7 @@ class MyController():
         self.max_yaw_rate = 2*360.0
         self.speed = 0.3
         self.current_z = 0
+        self.current_yaw = 0.0
 
         # if gait == OSCILLATION, the robot will oscillate around the desired direction
         self.amp_oscillation = 30 # [deg]
@@ -308,7 +309,7 @@ class MyController():
         dir2face = 0.0
 
         if gait == Gait.STATIC:
-            dir2face = 0.0
+            dir2face = np.deg2rad(self.current_yaw)
         elif gait == Gait.STRAIGHT:
             dir2face = direction
         elif gait == Gait.OSCILLATION:
@@ -349,7 +350,7 @@ class MyController():
         vyaw = 0.0
         
         if self.start_pos.x == -1.0:
-            self.start_pos = Coord(sensor_data['stateEstimate.x'], sensor_data['stateEstimate.y']) - Coord(0.0, 0.0)
+            self.start_pos = Coord(sensor_data['stateEstimate.x'], sensor_data['stateEstimate.y']) + Coord(0.0, 0.0)
             control_command = [vx, vy, vyaw, self.height_desired]
             return control_command
         else:
@@ -410,7 +411,7 @@ class MyController():
                 else:
                     print("take off 1 completed, current pos: ", self.current_pos, "start pos: ", self.start_pos)
                     self.global_goals = []
-                    self.state = State.GO_TO_LANDING_REGION
+                    self.state = State.GO_TO_LANDING_REGION #go landing region
 
             case State.GO_TO_LANDING_REGION:
                 if self.global_goals: # check if the array is not empty
@@ -420,7 +421,7 @@ class MyController():
                     else:
                         self.global_goals.pop(0) #delete the first element
                 else:
-                    if self.current_pos.x > 1.0:
+                    if self.current_pos.x > 3.5:
                         self.state = State.SCANNING_LANDING_PAD
                     else:
                         tmp = find_x_positive_free_cell(self.current_pos, inflated_map)
@@ -444,7 +445,7 @@ class MyController():
                         elif mode == Mode.DUMB:
                             if self.i >= len(preplanned_path):
                                 self.i = 0
-                            while inflated_map[c2dX(preplanned_path[self.i].x), c2dY(preplanned_path[self.i].y)] < -2:
+                            while inflated_map[c2dX(preplanned_path[self.i].x), c2dY(preplanned_path[self.i].y)] != 1:
                                 self.i += 1 # skip if cell blocked by obstacle
                                 if self.i >= len(preplanned_path):
                                     self.i = 0
@@ -454,6 +455,7 @@ class MyController():
                         
                             self.i += 1 # increment counter
                         obs_tmp = inflated_map.astype(int).tolist()
+                        print("2.5")
                         self.global_goals = array2Coord(astar(obs_tmp, (c2dX(self.current_pos.x), c2dY(self.current_pos.y)), (c2dX(tmp.x), c2dY(tmp.y))))
 
             case State.LAND_1:
@@ -482,13 +484,15 @@ class MyController():
                 else:
                     if Coord.dist(self.current_pos, self.global_goals[0]) > 0.05: 
                         vx, vy, vyaw, _ = self.move(sensor_data)
-                        if abs(self.previous_z - self.current_z) > 15:
+                        if abs(self.previous_z - self.current_z) > 10: #15
                             self.edge[self.edge_counter] = self.current_pos
                             print("state: ", self.edge_counter, "current pos: ", self.current_pos, "goal: ", self.global_goals[0])
                     else:
                         if self.edge_counter == 8:
                             if sensor_data['range.zrange'] < 20:
                                 self.state = State.TAKE_OFF_2
+                                self.edge_counter = 0
+                                gait = Gait.STRAIGHT
                                 self.global_goals = []
                                 self.height_desired = -2
                                 print("landing 1 completed")
@@ -512,7 +516,9 @@ class MyController():
                         if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
                             vx, vy, vyaw, _ = self.move(sensor_data)
                         else:
+                            print( "current pos: ",self.current_pos, " astar ", self.global_goals[0]) 
                             self.global_goals.pop(0) #delete the first element
+
                     else:
                         obs_tmp = inflated_map.astype(int).tolist()   
                         self.global_goals = array2Coord(astar(obs_tmp, (c2dX(self.current_pos.x), c2dY(self.current_pos.y)),
@@ -521,6 +527,7 @@ class MyController():
                     self.state = State.LAND_2
 
             case State.LAND_2:
+                print("land2")
                 gait = Gait.STATIC
                 if not self.global_goals:
                     if self.edge_counter == 0:
@@ -581,5 +588,7 @@ class MyController():
             plt.imsave("astar.png", np.flip(astar_map_drone.astype(int), 1), vmin=-1, vmax=3, cmap='gray', origin='lower')
         t +=1
 
+        if gait != Gait.STATIC:
+            self.current_yaw = sensor_data['stabilizer.yaw']
         control_command = [vx, vy, vyaw, self.height_desired]
         return control_command

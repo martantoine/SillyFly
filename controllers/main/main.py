@@ -87,7 +87,7 @@ class Logging:
         except AttributeError:
             print('Could not add Stabilizer log config, bad configuration.')
 
-        t = Timer(50, self._cf.close_link)
+        t = Timer(500, self._cf.close_link)
         t.start()
 
     def _stab_log_error(self, logconf, msg): 
