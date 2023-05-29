@@ -37,15 +37,15 @@ def get_neighbors(current, map):
             elif map[x][y] == 0:
                 cost = 2
             elif map[x][y] == -1 or map[x][y] == -2:
-                cost = 20
+                cost = 150
             elif map[x][y] == -3 or map[x][y] == -4:
-                cost = 50
-            elif map[x][y] == -5 or map[x][y] == -6:
                 cost = 200
+            elif map[x][y] == -5 or map[x][y] == -6:
+                cost = 300
             elif map[x][y] == -7 or map[x][y] == -8:
-                cost = 10000
+                cost = 400
             elif map[x][y] == -9 or map[x][y] == -10:
-                cost = 50000
+                cost = 800
             else:
                 cost = 10000
                 print("shit happened")

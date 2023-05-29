@@ -66,7 +66,7 @@ map_max = Coord(5.0, 3.0)
 map_res = 0.1
 map_nx = int((map_max.x - map_min.x) / map_res)
 map_ny = int((map_max.y - map_min.y) / map_res)
-range_max = 1.5
+range_max = 2.0
 conf = 1
 
 plot = False # plot the yaw controller & other data
@@ -415,7 +415,7 @@ class MyController():
                     self.state = State.GO_TO_LANDING_REGION #go landing region
 
             case State.GO_TO_LANDING_REGION:
-                if self.global_goals and self.pop_count <= 7: # check if the array is not empty or too long since last check
+                if self.global_goals and self.pop_count <= 5: # check if the array is not empty or too long since last check
 
                     if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
                         vx, vy, vyaw, _ = self.move(sensor_data)
@@ -522,7 +522,7 @@ class MyController():
                     
             case State.GO_TO_TAKE_OFF_PAD:
                 if Coord.dist(self.current_pos, self.start_pos) > lateral_threshold:
-                    if self.global_goals and self.pop_count <= 7: # check if the array is not empty
+                    if self.global_goals and self.pop_count <= 5: # check if the array is not empty
                         if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
                             vx, vy, vyaw, _ = self.move(sensor_data)
                         else:

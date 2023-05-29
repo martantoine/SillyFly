@@ -66,7 +66,7 @@ map_max = Coord(5.0, 3.0)
 map_res = 0.1
 map_nx = int((map_max.x - map_min.x) / map_res)
 map_ny = int((map_max.y - map_min.y) / map_res)
-range_max = 1.5
+range_max = 2.0
 conf = 1
 
 plot = False # plot the yaw controller & other data
@@ -515,23 +515,20 @@ class MyController():
                     self.height_desired = self.flying_height
                 else:
                     self.state = State.GO_TO_TAKE_OFF_PAD
-                    self.pop_count = 0
                     self.global_goals = []
                     self.speed = 0.3
                     print("take off 2 completed")
                     
             case State.GO_TO_TAKE_OFF_PAD:
                 if Coord.dist(self.current_pos, self.start_pos) > lateral_threshold:
-                    if self.global_goals and self.pop_count <= 7: # check if the array is not empty
+                    if self.global_goals: # check if the array is not empty
                         if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
                             vx, vy, vyaw, _ = self.move(sensor_data)
                         else:
                             print( "current pos: ",self.current_pos, " astar ", self.global_goals[0]) 
                             self.global_goals.pop(0) #delete the first element
-                            self.pop_count += 1
 
                     else:
-                        self.pop_count = 0
                         obs_tmp = inflated_map.astype(int).tolist()   
                         self.global_goals = array2Coord(astar(obs_tmp, (c2dX(self.current_pos.x), c2dY(self.current_pos.y)),
                                                 (c2dX(self.start_pos.x), c2dY(self.start_pos.y))))
