@@ -57,7 +57,7 @@ class Gait(Enum): # gait of the robot
 """
 Super parameters
 """
-gait = Gait.STRAIGHT # Gait of the robot
+gait = Gait.STATIC # Gait of the robot
 mode = Mode.DUMB
 lateral_threshold = 0.15 # in meters
 
@@ -177,7 +177,7 @@ def occupancy_map(current_pos, sensor_data):
 
 class MyController():
     def __init__(self):
-        self.start_pos    = Coord(-1.0, -1.0)
+        self.start_pos    = Coord(0.75, 1.5)
         self.current_pos  = Coord(0.0, 0.0)
         self.global_goals = []
         self.state = State.TAKE_OFF_1
@@ -210,10 +210,10 @@ class MyController():
         self.freq_oscillation = 1.0 # [Hz]
         self.count_pid = 0.0
 
-        self.prev_speed_x = 0.0
-        self.prev_speed_y = 0.0
-
         self.count = 0
+        self.pop_count = 0
+        self.prev_vx = 0.0
+        self.prev_vy = 0.0
 
         #build table of 100 values
         self.values_100 = []
@@ -309,7 +309,8 @@ class MyController():
         dir2face = 0.0
 
         if gait == Gait.STATIC:
-            dir2face = np.deg2rad(self.current_yaw)
+            #dir2face = np.deg2rad(self.current_yaw)
+            dir2face = 0.0
         elif gait == Gait.STRAIGHT:
             dir2face = direction
         elif gait == Gait.OSCILLATION:
@@ -354,8 +355,8 @@ class MyController():
             control_command = [vx, vy, vyaw, self.height_desired]
             return control_command
         else:
-            #self.current_pos = Coord(sensor_data['stateEstimate.x'], sensor_data['stateEstimate.y']) - self.start_pos
-            self.current_pos = Coord(sensor_data['stateEstimate.x'], sensor_data['stateEstimate.y'])
+            self.current_pos = Coord(sensor_data['stateEstimate.x'], sensor_data['stateEstimate.y']) + self.start_pos
+            #self.current_pos = Coord(sensor_data['stateEstimate.x'], sensor_data['stateEstimate.y'])
         
         self.zA_hist[self.zA_i] = sensor_data['range.zrange']
         self.zA_i += 1
@@ -414,13 +415,15 @@ class MyController():
                     self.state = State.GO_TO_LANDING_REGION #go landing region
 
             case State.GO_TO_LANDING_REGION:
-                if self.global_goals: # check if the array is not empty
+                if self.global_goals and self.pop_count <= 10: # check if the array is not empty or too long since last check
 
                     if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
                         vx, vy, vyaw, _ = self.move(sensor_data)
                     else:
                         self.global_goals.pop(0) #delete the first element
+                        self.pop_count += 1
                 else:
+                    self.pop_count = 0
                     if self.current_pos.x > 3.5:
                         self.state = State.SCANNING_LANDING_PAD
                     else:
@@ -430,9 +433,11 @@ class MyController():
 
             case State.SCANNING_LANDING_PAD:
                 if diff > 60:
-                    self.state = State.LAND_1
-                    self.global_goals = []
+                    prev_vx, prev_vy, _, _ = self.move(sensor_data) # save previous speed
+                    self.global_goals[0] = self.current_pos + Coord(0.1*prev_vx, 0.1*prev_vy) # land a bit further
+                    self.speed = 0.08
                     print("go to landing 1")
+                    self.state = State.LAND_1
                 else:   
                     if self.global_goals: # check if the array is not empty
                         if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
@@ -459,48 +464,63 @@ class MyController():
                         self.global_goals = array2Coord(astar(obs_tmp, (c2dX(self.current_pos.x), c2dY(self.current_pos.y)), (c2dX(tmp.x), c2dY(tmp.y))))
 
             case State.LAND_1:
-                gait = Gait.STATIC
-                self.speed = 0.2
-                if not self.global_goals:
-                    if self.edge_counter == 0:
-                        self.pos_landing = self.current_pos
-                        self.global_goals = [Coord(-0.4, 0.0) + self.pos_landing]
-                    elif self.edge_counter == 1:
-                        self.global_goals = [Coord(0.0, 0.0) + self.pos_landing]
-                    elif self.edge_counter == 2:
-                        self.global_goals = [Coord(0.4, 0.0) + self.pos_landing]
-                    elif self.edge_counter == 3:
-                        self.global_goals = [Coord(0.0, 0.0) + self.pos_landing]
-                    elif self.edge_counter == 4:
-                        self.global_goals = [Coord(0.0, -0.4) + self.pos_landing]
-                    elif self.edge_counter == 5:
-                        self.global_goals = [Coord(0.0, 0.0) + self.pos_landing]
-                    elif self.edge_counter == 6:
-                        self.global_goals = [Coord(0.0, 0.4) + self.pos_landing]
-                    elif self.edge_counter == 7:
-                        self.global_goals = [Coord(0.0, 0.0) + self.pos_landing]
-                    elif self.edge_counter == 8:
-                        self.global_goals = [Coord((self.edge[0].x + self.edge[1].x + self.edge[2].x + self.edge[3].x) / 4.0, (self.edge[4].y + self.edge[5].y + self.edge[6].y + self.edge[7].y) / 4.0)]
+                if sensor_data['range.zrange'] < 20:
+                    self.global_goals = []
+                    self.edge_counter = 0
+                    self.height_desired = -2
+                    self.speed = 0.3
+                    print("landing 1 completed")
+                    self.state = State.TAKE_OFF_2
                 else:
-                    if Coord.dist(self.current_pos, self.global_goals[0]) > 0.05: 
-                        vx, vy, vyaw, _ = self.move(sensor_data)
-                        if abs(self.previous_z - self.current_z) > 10: #15
-                            self.edge[self.edge_counter] = self.current_pos
-                            print("state: ", self.edge_counter, "current pos: ", self.current_pos, "goal: ", self.global_goals[0])
-                    else:
-                        if self.edge_counter == 8:
-                            if sensor_data['range.zrange'] < 20:
-                                self.state = State.TAKE_OFF_2
-                                self.edge_counter = 0
-                                gait = Gait.STRAIGHT
-                                self.global_goals = []
-                                self.height_desired = -2
-                                print("landing 1 completed")
-                            else:    
-                                self.height_desired -= 0.002
-                        else:
-                            self.global_goals = []
-                            self.edge_counter += 1
+                    self.height_desired -= 0.002
+                    vx, vy, vyaw, _ = self.move(sensor_data)
+                # gait = Gait.STATIC
+                # self.speed = 0.2
+                # if not self.global_goals:
+                #     if self.edge_counter == 0:
+                #         for edge in self.edge: # security if don't detect an edge
+                #             edge = self.current_pos
+                #         self.pos_landing = self.current_pos
+                #         self.global_goals = [Coord(-0.4, 0.0) + self.pos_landing]
+                #     elif self.edge_counter == 1:
+                #         self.global_goals = [Coord(0.0, 0.0) + self.pos_landing]
+                #     elif self.edge_counter == 2:
+                #         self.global_goals = [Coord(0.4, 0.0) + self.pos_landing]
+                #     elif self.edge_counter == 3:
+                #         self.global_goals = [Coord(0.0, 0.0) + self.pos_landing]
+                #     elif self.edge_counter == 4:
+                #         self.global_goals = [Coord(0.0, -0.4) + self.pos_landing]
+                #     elif self.edge_counter == 5:
+                #         self.global_goals = [Coord(0.0, 0.0) + self.pos_landing]
+                #     elif self.edge_counter == 6:
+                #         self.global_goals = [Coord(0.0, 0.4) + self.pos_landing]
+                #     elif self.edge_counter == 7:
+                #         self.global_goals = [Coord(0.0, 0.0) + self.pos_landing]
+                #         self.speed = 0.1
+                #     elif self.edge_counter == 8:
+                #         self.speed == 0.05
+                #         self.global_goals = [Coord((self.edge[0].x + self.edge[1].x + self.edge[2].x + self.edge[3].x) / 4.0, (self.edge[4].y + self.edge[5].y + self.edge[6].y + self.edge[7].y) / 4.0)]
+                # else:
+                #     if Coord.dist(self.current_pos, self.global_goals[0]) > 0.02: 
+                #         vx, vy, vyaw, _ = self.move(sensor_data)
+                #         print("state: ", self.edge_counter)
+                #         if abs(self.previous_z - self.current_z) > 7: #15
+                #             self.edge[self.edge_counter] = self.current_pos
+                #             print("state: ", self.edge_counter, "current pos: ", self.current_pos, "goal: ", self.global_goals[0])
+                #     else:
+                #         if self.edge_counter == 8:
+                #             if sensor_data['range.zrange'] < 20:
+                #                 self.state = State.TAKE_OFF_2
+                #                 self.edge_counter = 0
+                #                 #gait = Gait.STRAIGHT
+                #                 self.global_goals = []
+                #                 self.height_desired = -2
+                #                 print("landing 1 completed")
+                #             else:    
+                #                 self.height_desired -= 0.002
+                #         else:
+                #             self.global_goals = []
+                #             self.edge_counter += 1
                     
             case State.TAKE_OFF_2:
                 if sensor_data['range.zrange'] < 390:
@@ -508,10 +528,11 @@ class MyController():
                 else:
                     self.state = State.GO_TO_TAKE_OFF_PAD
                     self.global_goals = []
+                    self.speed = 0.3
                     print("take off 2 completed")
                     
             case State.GO_TO_TAKE_OFF_PAD:
-                if Coord.dist(self.current_pos, Coord(0.0, 0.0)) > lateral_threshold:
+                if Coord.dist(self.current_pos, self.start_pos) > lateral_threshold:
                     if self.global_goals: # check if the array is not empty
                         if Coord.dist(self.current_pos, self.global_goals[0]) > lateral_threshold:
                             vx, vy, vyaw, _ = self.move(sensor_data)
@@ -522,7 +543,7 @@ class MyController():
                     else:
                         obs_tmp = inflated_map.astype(int).tolist()   
                         self.global_goals = array2Coord(astar(obs_tmp, (c2dX(self.current_pos.x), c2dY(self.current_pos.y)),
-                                                (c2dX(0.0), c2dY(0.0))))
+                                                (c2dX(self.start_pos.x), c2dY(self.start_pos.y))))
                 else:
                     self.state = State.LAND_2
 
@@ -531,6 +552,10 @@ class MyController():
                 gait = Gait.STATIC
                 if not self.global_goals:
                     if self.edge_counter == 0:
+                        for edge in self.edge: # security if don't detect an edge
+                            edge = self.current_pos
+                        self.pos_landing = self.current_pos
+                        self.speed = 0.2
                         self.pos_landing = self.current_pos
                         self.global_goals = [Coord(-0.4, 0.0) + self.pos_landing]
                     elif self.edge_counter == 1:
@@ -546,14 +571,15 @@ class MyController():
                     elif self.edge_counter == 6:
                         self.global_goals = [Coord(0.0, 0.4) + self.pos_landing]
                     elif self.edge_counter == 7:
+                        self.speed = 0.1
                         self.global_goals = [Coord(0.0, 0.0) + self.pos_landing]
                     elif self.edge_counter == 8:
                         self.global_goals = [Coord((self.edge[0].x + self.edge[1].x + self.edge[2].x + self.edge[3].x) / 4.0, (self.edge[4].y + self.edge[5].y + self.edge[6].y + self.edge[7].y) / 4.0)]
     
                 else:
-                    if Coord.dist(self.current_pos, self.global_goals[0]) > 0.05: 
+                    if Coord.dist(self.current_pos, self.global_goals[0]) > 0.02: 
                         vx, vy, vyaw, _ = self.move(sensor_data)
-                        if abs(self.previous_z - self.current_z) > 15:
+                        if abs(self.previous_z - self.current_z) > 7:
                             self.edge[self.edge_counter] = self.current_pos
                             print("state: ", self.edge_counter, "current pos: ", self.current_pos, "goal: ", self.global_goals[0])
                     else:
@@ -588,7 +614,7 @@ class MyController():
             plt.imsave("astar.png", np.flip(astar_map_drone.astype(int), 1), vmin=-1, vmax=3, cmap='gray', origin='lower')
         t +=1
 
-        if gait != Gait.STATIC:
-            self.current_yaw = sensor_data['stabilizer.yaw']
+        #if gait != Gait.STATIC:
+        #    self.current_yaw = sensor_data['stabilizer.yaw']
         control_command = [vx, vy, vyaw, self.height_desired]
         return control_command
